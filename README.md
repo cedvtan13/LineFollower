@@ -78,6 +78,59 @@ main.c
       └─ UI_Refresh()          [ui.c]
 ```
 
+```mermaid
+flowchart TD
+    HW["🔌 Hardware Peripherals\n─────────────────\nADC1_CH9 · TIM2 PWM\nI2C1 · I2C3 · GPIO"]
+
+    MAIN["main.c\nHAL_Init · Clocks · Peripherals\nApp_Init() → loop: App_Update()"]
+
+    subgraph APP["Application Layer  —  menu.c"]
+        direction TB
+        SM["State Machine\nSCR_MAIN · SCR_RUNNING\nSCR_CALIBRATE · SCR_PID\nSCR_SENSOR_DEBUG"]
+        INPUT["input.c\nDebounce · Short/Long press\nButtonEvent queue"]
+        SM -->|"Route_ButtonEvent()"| INPUT
+    end
+
+    subgraph RUNNING["SCR_RUNNING  (every loop)"]
+        PID["pid_controller.c\nSensor_ReadAll()\nCompute P·I·D\nSpeed management\nLost-line recovery"]
+    end
+
+    subgraph CALIBRATE["SCR_CALIBRATE  (every loop)"]
+        CAL["calibration.c\nMotor_SetSpeeds CW\n5 s auto-spin\nSensor_CalUpdate()\nSensor_CalFinish()"]
+    end
+
+    subgraph DEBUG["SCR_SENSOR_DEBUG  (every loop)"]
+        SENS_DBG["sensor.c\nSensor_ReadAll()\nRaw ADC display"]
+    end
+
+    SENSOR["sensor.c\nCD74HC4067 MUX\n16×QRE1113 ADC reads\nWeighted position calc\nPer-channel calibration"]
+
+    MOTOR["motor.c\nTB6612FNG\nDirection GPIO\n20 kHz PWM · Deadband"]
+
+    UI["ui.c\nOLED page rendering\nAll 5 screens"]
+
+    OLED["ssd1306.c\nSH1106 framebuffer\nI2C1 @ 400 kHz"]
+
+    FLASH["flash_storage.c\nSector 7  0x08060000\nPID save · load\nMagic 0xDEAD1234"]
+
+    HW --> MAIN
+    MAIN --> APP
+    APP --> RUNNING
+    APP --> CALIBRATE
+    APP --> DEBUG
+    APP --> UI
+
+    PID --> SENSOR
+    PID --> MOTOR
+    CAL --> SENSOR
+    CAL --> MOTOR
+    SENS_DBG --> SENSOR
+
+    SENSOR -->|"sensorRaw[]\nsensorVal[]\nlinePosition"| PID
+    UI --> OLED
+    APP -->|"FlashStorage_Load\nFlashStorage_Save"| FLASH
+```
+
 ### Module Overview
 
 | File | Responsibility |
@@ -127,7 +180,7 @@ Press **E** (short or long) to stop motors and return to main menu.
 1. Navigate to page **2/4 CALIBRATE** on the main menu.
 2. Place the robot on the track so the sensor array spans both the black line and white surface.
 3. Press **E** — the spin starts **immediately** (no second confirmation screen).
-4. The robot pivots **clockwise** at a fixed 30% speed for **5 seconds** while all 16 sensors continuously record their min and max ADC values.
+4. The robot pivots **clockwise** at a fixed 20% speed for **5 seconds** while all 16 sensors continuously record their min and max ADC values.
 5. Motors stop automatically, per-channel thresholds are computed, and the display returns to the main menu with `Status:[CALIBRATED]`.
 
 During spin the display shows:
@@ -321,7 +374,7 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
 | `SENSOR_CURVE_EXTRA` | `sensor.h` | 500 | Extra position units per curved sensor step |
 | `SENSOR_THR_DEF` | `sensor.h` | 2048 | Global fallback ADC threshold (pre-calibration) |
 | `CAL_SPIN_MS` | `calibration.c` | 5000 | Calibration spin duration (ms) |
-| `CAL_SPIN_SPEED` | `calibration.c` | 30 | Calibration spin speed (%) — independent of pid.baseSpeed |
+| `CAL_SPIN_SPEED` | `calibration.c` | 20 | Calibration spin speed (%) — independent of pid.baseSpeed |
 | `DERIV_ALPHA` | `pid_controller.c` | 0.35 | Derivative low-pass filter coefficient |
 | `CORNER_DROP` | `pid_controller.c` | 0.65 | Quadratic corner slowdown factor |
 | `MOTOR_DEADBAND` | `motor.c` | 150 | Minimum PWM tick to overcome motor stiction |
