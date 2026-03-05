@@ -43,13 +43,13 @@ The robot is built around the **STM32F411CEU6** (Black Pill) and interfaces with
 ```mermaid
 flowchart LR
     subCPU[STM32F411<br/>Black Pill]
-    subSens[16× QRE1113<br/>IR Sensors]
+    subSens["16x QRE1113<br/>IR Sensors"]
     subMUX[CD74HC4067<br/>16‑ch MUX]
     subMotor[TB6612FNG<br/>Motor Driver]
     subMotors[N20 Motors]
-    subOLED[SH1106 OLED<br/>I²C]
+    subOLED["SH1106 OLED<br/>I2C"]
     subButtons[Buttons<br/>L / E / R]
-    subIMU[ICM-42688<br/>IMU (reserved)]
+    subIMU["ICM-42688<br/>IMU (reserved)"]
 
     subCPU -- ADC + GPIO --> subMUX
     subMUX -- analog --> subSens
@@ -57,7 +57,7 @@ flowchart LR
     subMotor --> subMotors
     subCPU -- I²C1 --> subOLED
     subCPU -- GPIO --> subButtons
-    subCPU -. I²C3 .-> subIMU
+    subCPU -. I2C3 .-> subIMU
 ```
 
 ---
@@ -159,7 +159,7 @@ flowchart TD
     GPIO --> MOTOR
     GPIO --> INPUT
     I2C1 --> SSD1306
-    I2C3 -.-> ICM42688   %% unused, dashed line
+    I2C3 -.-> ICM42688
     FLASH_INT --> FLASH
 
     %% Drivers → Modules
@@ -179,7 +179,7 @@ flowchart TD
     CAL --> SENSOR
     CAL --> MOTOR
 
-    SENSOR --> PID    %% returns linePosition, raw values
+    SENSOR --> PID
 
     %% main → menu
     MAIN --> MENU
@@ -388,7 +388,7 @@ flowchart TD
     F --> G[Update display]
     G --> D
     D -->|No| H[Stop motors]
-    H --> I[For each channel:<br/>threshold = (min+max)/2]
+    H --> I["For each channel:<br/>threshold = (min+max)/2"]
     I --> J[Swing < 600?]
     J -->|Yes| K[Fall back to SENSOR_THR_DEF]
     J -->|No| L[Use computed threshold]
