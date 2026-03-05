@@ -131,12 +131,14 @@ int16_t Sensor_ComputePosition(void)
          * This yields sub-sensor resolution and smooth PID input.
          */
         float weighted = 0.0f, total = 0.0f;
+        uint8_t active = 0;
         for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
             uint16_t span = sensorCalMax[ch] - sensorCalMin[ch];
             if (span < CAL_MIN_SWING) continue;  /* skip uncalibrated sensor  */
             float norm = (float)((int16_t)sensorRaw[ch] - (int16_t)sensorCalMin[ch])
                          / (float)span;
             if (norm < 0.05f) norm = 0.0f;   /* dead-zone: treat as white   */
+            else              active++;       /* counts above dead-zone once  */
             if (norm > 1.0f)  norm = 1.0f;
             weighted += norm * (float)SENS_POS[ch];
             total    += norm;
@@ -145,7 +147,7 @@ int16_t Sensor_ComputePosition(void)
             sensorActiveCount = 0;
             return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
         }
-        sensorActiveCount = 16;   /* analog mode: line detected */
+        sensorActiveCount = active;
         linePosition = (int16_t)(weighted / total);
         return linePosition;
     } else {

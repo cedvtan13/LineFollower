@@ -216,17 +216,18 @@ static void UI_DrawCalibrate(void)
         ssd1306_WriteString("AUTO CALIBRATE");
 
         ssd1306_SetCursor(0, 2);
-        ssd1306_WriteString("1. Hover above WHITE");
+        ssd1306_WriteString("Place robot on track");
         ssd1306_SetCursor(0, 3);
-        ssd1306_WriteString("2. Press E to start");
-        ssd1306_SetCursor(0, 4);
-        ssd1306_WriteString("3. Sweep over BLACK");
+        ssd1306_WriteString("then press E.");
         ssd1306_SetCursor(0, 5);
-        ssd1306_WriteString("4. Press E when done");
+        ssd1306_WriteString("Robot will spin CW");
+        ssd1306_SetCursor(0, 6);
+        ssd1306_WriteString("for 5 s to calibrate.");
 
         ssd1306_SetCursor(0, 7);
         ssd1306_WriteString("E=start    L=back");
     } else {
+        /* CAL_SPIN — show live sensor bar + countdown */
         ssd1306_SetCursor(16, 0);
         ssd1306_WriteString("CALIBRATING...");
 
@@ -257,8 +258,16 @@ static void UI_DrawCalibrate(void)
         ssd1306_SetCursor(0, 5);
         ssd1306_WriteString(buf);
 
+        /* Countdown timer (tenths of a second) */
+        uint32_t ms  = Calibration_TimeRemaining();
+        uint32_t sec = ms / 1000u;
+        uint32_t ten = (ms % 1000u) / 100u;
+        sprintf(buf, "%lu.%lus left", sec, ten);
+        ssd1306_SetCursor(66, 5);
+        ssd1306_WriteString(buf);
+
         ssd1306_SetCursor(0, 7);
-        ssd1306_WriteString("E=done  L=abort");
+        ssd1306_WriteString("E/L = abort");
     }
 }
 

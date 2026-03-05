@@ -9,24 +9,31 @@
 #include "menu.h"  /* calState, calibrated declared in menu.h */
 
 /* Calibration state values */
-#define CAL_IDLE  0   /* showing instructions, waiting for E */
-#define CAL_SWEEP 1   /* actively sweeping, recording min/max */
+#define CAL_IDLE  0   /* idle — waiting for E press       */
+#define CAL_SPIN  1   /* spinning clockwise, recording min/max */
 
 /* calState and calibrated are declared in menu.h */
 
 /* Initialize calibration state */
 void Calibration_Init(void);
 
-/* Start a new calibration sweep */
+/* Start the auto-spin sweep */
 void Calibration_Start(void);
 
-/* Update calibration (called every loop during sweep) */
+/* Update calibration (called every loop — auto-finishes after CAL_SPIN_MS) */
 void Calibration_Update(void);
 
-/* Finish calibration and compute thresholds */
-void Calibration_Finish(void);
-
-/* Abort current calibration */
+/* Force-finish early (e.g. user aborts) */
 void Calibration_Abort(void);
+
+/*
+ * Returns 1 (once) when the spin has finished and thresholds have been
+ * computed.  Caller (App_Update) should then set calibrated=1 and switch
+ * screen.  Clears itself on read.
+ */
+uint8_t Calibration_IsDone(void);
+
+/* Milliseconds remaining in the current spin (0 when not spinning) */
+uint32_t Calibration_TimeRemaining(void);
 
 #endif

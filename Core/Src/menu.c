@@ -158,19 +158,18 @@ static void Handle_Calibrate(ButtonEvent ev)
     switch (ev) {
         case BTN_ENTER_SHORT:
             if (calState == CAL_IDLE) {
+                /* Start the auto-spin sweep */
                 Calibration_Start();
                 UI_Refresh();
             } else {
-                /* Finish sweep: computes thresholds, sets calState=IDLE */
-                Calibration_Finish();
-                calibrated    = 1;   /* accept results */
-                currentScreen = SCR_MAIN;
+                /* E during spin — abort immediately */
+                Calibration_Abort();
                 UI_Refresh();
             }
             break;
 
         case BTN_LEFT:
-            if (calState == CAL_SWEEP) {
+            if (calState == CAL_SPIN) {
                 Calibration_Abort();
             } else {
                 currentScreen = SCR_MAIN;
@@ -334,11 +333,15 @@ void App_Update(void)
             UI_Refresh();
         }
     } else if (currentScreen == SCR_CALIBRATE) {
-        /* Update calibration (reads sensors / updates min-max during sweep) */
+        /* Update calibration (reads sensors / drives motors during spin) */
         Calibration_Update();
 
-        /* Refresh display every 100 ms */
-        if ((now - lastDispCal) >= 100u) {
+        /* Auto-finish: motor already stopped inside Calibration_Update */
+        if (Calibration_IsDone()) {
+            calibrated    = 1;
+            currentScreen = SCR_MAIN;
+            UI_Refresh();
+        } else if ((now - lastDispCal) >= 100u) {
             lastDispCal = now;
             UI_Refresh();
         }

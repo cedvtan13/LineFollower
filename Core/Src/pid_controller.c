@@ -51,7 +51,7 @@ static int16_t  recovR     = 0;
    INITIALIZATION
    ================================================================ */
 
-void PID_Init(void)
+void PID_Reset(void)
 {
     pidIntegral  = 0.0f;
     pidLastError = 0.0f;
@@ -61,14 +61,9 @@ void PID_Init(void)
     recovR       = 0;
 }
 
-void PID_Reset(void)
+void PID_Init(void)
 {
-    pidIntegral  = 0.0f;
-    pidLastError = 0.0f;
-    pidDeriv     = 0.0f;
-    lineLostAt   = 0;
-    recovL       = 0;
-    recovR       = 0;
+    PID_Reset();   /* same state — single point of truth */
 }
 
 /* ================================================================
@@ -136,7 +131,9 @@ void PID_Update(void)
                  + pid.Ki * pidIntegral
                  + pid.Kd * pidDeriv;
 
-    float steering = output / (SENSOR_POS_MAX / 100.0f);
+    /* SENSOR_POS_MAX / 100 is a compile-time constant — multiply is faster than divide */
+    static const float STEER_SCALE = 100.0f / (float)SENSOR_POS_MAX;
+    float steering = output * STEER_SCALE;
 
     /* ================================================================
        SPEED MANAGEMENT
