@@ -80,38 +80,33 @@ main.c
 
 ```mermaid
 flowchart TD
-    HW["🔌 Hardware Peripherals\n─────────────────\nADC1_CH9 · TIM2 PWM\nI2C1 · I2C3 · GPIO"]
+    HW["Hardware Peripherals<br/>ADC1_CH9 · TIM2 PWM<br/>I2C1 · I2C3 · GPIO"]
+    MAIN["main.c<br/>HAL_Init · Clocks · Peripherals<br/>App_Init() then loop: App_Update()"]
 
-    MAIN["main.c\nHAL_Init · Clocks · Peripherals\nApp_Init() → loop: App_Update()"]
-
-    subgraph APP["Application Layer  —  menu.c"]
+    subgraph APP["Application Layer — menu.c"]
         direction TB
-        SM["State Machine\nSCR_MAIN · SCR_RUNNING\nSCR_CALIBRATE · SCR_PID\nSCR_SENSOR_DEBUG"]
-        INPUT["input.c\nDebounce · Short/Long press\nButtonEvent queue"]
+        SM["State Machine<br/>SCR_MAIN · SCR_RUNNING<br/>SCR_CALIBRATE · SCR_PID<br/>SCR_SENSOR_DEBUG"]
+        INPUT["input.c<br/>Debounce · Short/Long press<br/>ButtonEvent queue"]
         SM -->|"Route_ButtonEvent()"| INPUT
     end
 
-    subgraph RUNNING["SCR_RUNNING  (every loop)"]
-        PID["pid_controller.c\nSensor_ReadAll()\nCompute P·I·D\nSpeed management\nLost-line recovery"]
+    subgraph RUNNING["SCR_RUNNING — every loop"]
+        PID["pid_controller.c<br/>Sensor_ReadAll()<br/>Compute P·I·D<br/>Speed management<br/>Lost-line recovery"]
     end
 
-    subgraph CALIBRATE["SCR_CALIBRATE  (every loop)"]
-        CAL["calibration.c\nMotor_SetSpeeds CW\n5 s auto-spin\nSensor_CalUpdate()\nSensor_CalFinish()"]
+    subgraph CALIBRATE["SCR_CALIBRATE — every loop"]
+        CAL["calibration.c<br/>Motor_SetSpeeds CW<br/>5s auto-spin<br/>Sensor_CalUpdate()<br/>Sensor_CalFinish()"]
     end
 
-    subgraph DEBUG["SCR_SENSOR_DEBUG  (every loop)"]
-        SENS_DBG["sensor.c\nSensor_ReadAll()\nRaw ADC display"]
+    subgraph DEBUG["SCR_SENSOR_DEBUG — every loop"]
+        SENS_DBG["sensor.c<br/>Sensor_ReadAll()<br/>Raw ADC display"]
     end
 
-    SENSOR["sensor.c\nCD74HC4067 MUX\n16×QRE1113 ADC reads\nWeighted position calc\nPer-channel calibration"]
-
-    MOTOR["motor.c\nTB6612FNG\nDirection GPIO\n20 kHz PWM · Deadband"]
-
-    UI["ui.c\nOLED page rendering\nAll 5 screens"]
-
-    OLED["ssd1306.c\nSH1106 framebuffer\nI2C1 @ 400 kHz"]
-
-    FLASH["flash_storage.c\nSector 7  0x08060000\nPID save · load\nMagic 0xDEAD1234"]
+    SENSOR["sensor.c<br/>CD74HC4067 MUX<br/>16x QRE1113 ADC reads<br/>Weighted position calc<br/>Per-channel calibration"]
+    MOTOR["motor.c<br/>TB6612FNG<br/>Direction GPIO<br/>20 kHz PWM · Deadband"]
+    UI["ui.c<br/>OLED page rendering<br/>All 5 screens"]
+    OLED["ssd1306.c<br/>SH1106 framebuffer<br/>I2C1 at 400 kHz"]
+    FLASH["flash_storage.c<br/>Sector 7 — 0x08060000<br/>PID save · load<br/>Magic 0xDEAD1234"]
 
     HW --> MAIN
     MAIN --> APP
@@ -126,9 +121,9 @@ flowchart TD
     CAL --> MOTOR
     SENS_DBG --> SENSOR
 
-    SENSOR -->|"sensorRaw[]\nsensorVal[]\nlinePosition"| PID
+    SENSOR -->|"sensorRaw[] sensorVal[] linePosition"| PID
     UI --> OLED
-    APP -->|"FlashStorage_Load\nFlashStorage_Save"| FLASH
+    APP -->|"FlashStorage_Load / Save"| FLASH
 ```
 
 ### Module Overview
