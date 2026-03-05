@@ -6,11 +6,7 @@
 #define UI_H
 
 #include <stdint.h>
-#include "menu.h"  /* AppScreen, currentScreen, etc. */
-
-extern uint8_t   mainCursor;
-extern uint8_t   pidCursor;
-extern uint8_t   pidEdit;
+#include "menu.h"  /* AppScreen, currentScreen, cursors — all declared in menu.h */
 
 /* Initialize display */
 void UI_Init(void);

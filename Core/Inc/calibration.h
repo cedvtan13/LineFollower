@@ -6,14 +6,13 @@
 #define CALIBRATION_H
 
 #include <stdint.h>
-#include "menu.h"  /* extern calibrated */
+#include "menu.h"  /* calState, calibrated declared in menu.h */
 
-/* Calibration state */
+/* Calibration state values */
 #define CAL_IDLE  0   /* showing instructions, waiting for E */
 #define CAL_SWEEP 1   /* actively sweeping, recording min/max */
 
-extern uint8_t calState;
-extern uint8_t calibrated;
+/* calState and calibrated are declared in menu.h */
 
 /* Initialize calibration state */
 void Calibration_Init(void);

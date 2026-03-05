@@ -6,12 +6,10 @@
 #define PID_CONTROLLER_H
 
 #include <stdint.h>
-#include "menu.h"  /* typedef PIDConfig and extern for pid */
-
-/* Public state (read by UI and save/load) */
-extern PIDConfig pid;
+#include "menu.h"  /* PIDConfig typedef, pid, AppScreen */
 
 /* Initialize PID controller state */
+/* (pid is already declared extern in menu.h) */
 void PID_Init(void);
 
 /* Update PID: read sensors, compute output, set motor speeds */

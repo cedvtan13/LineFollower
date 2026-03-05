@@ -11,8 +11,8 @@
 
 void Calibration_Init(void)
 {
-    calState   = CAL_IDLE;
-    calibrated = 0;
+    /* Reset only the sweep state; calibrated flag is owned by menu.c/App_Init */
+    calState = CAL_IDLE;
 }
 
 void Calibration_Start(void)
@@ -33,8 +33,8 @@ void Calibration_Update(void)
 void Calibration_Finish(void)
 {
     Sensor_CalFinish();
-    calState   = CAL_IDLE;
-    calibrated = 1;
+    calState = CAL_IDLE;
+    /* calibrated flag is set by Handle_Calibrate() in menu.c */
 }
 
 void Calibration_Abort(void)

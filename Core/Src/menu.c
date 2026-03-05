@@ -26,19 +26,17 @@
 #include <stdio.h>
 
 /* ================================================================
-   PUBLIC GLOBALS
+   PUBLIC GLOBALS (definitions — extern declared in menu.h)
    ================================================================ */
-PIDConfig pid = {2.0f, 0.0f, 3.0f, 30};
-AppScreen currentScreen = SCR_MAIN;
-uint8_t   calibrated = 0;
+PIDConfig pid            = {2.0f, 0.0f, 3.0f, 30};
+AppScreen currentScreen  = SCR_MAIN;
+uint8_t   calibrated     = 0;
 
-/* UI state (screen cursor positions) */
-uint8_t   mainCursor = 0;
-uint8_t   pidCursor  = 0;
-uint8_t   pidEdit    = 0;
+uint8_t   mainCursor     = 0;   /* main menu page 0–3                */
+uint8_t   pidCursor      = 0;   /* PID cursor 0–4 (4 = SAVE)         */
+uint8_t   pidEdit        = 0;   /* 1 while editing a PID value       */
 
-/* Calibration state */
-uint8_t   calState   = CAL_IDLE;
+uint8_t   calState       = CAL_IDLE;
 
 /* ================================================================
    FORWARD DECLARATIONS
@@ -101,7 +99,8 @@ static void Handle_MainMenu(ButtonEvent ev)
                     break;
 
                 case 1: /* CALIBRATE */
-                    Calibration_Init();
+                    /* Reset sweep state only — do NOT wipe calibrated flag */
+                    calState = CAL_IDLE;
                     currentScreen = SCR_CALIBRATE;
                     UI_Refresh();
                     break;
@@ -162,8 +161,9 @@ static void Handle_Calibrate(ButtonEvent ev)
                 Calibration_Start();
                 UI_Refresh();
             } else {
+                /* Finish sweep: computes thresholds, sets calState=IDLE */
                 Calibration_Finish();
-                calibrated = 1;
+                calibrated    = 1;   /* accept results */
                 currentScreen = SCR_MAIN;
                 UI_Refresh();
             }
@@ -280,9 +280,10 @@ void App_Init(void)
     /* Load PID from flash (if previously saved) */
     FlashStorage_Load(&pid);
 
-    /* Initialize all sub-modules */
-    PID_Init();
-    Calibration_Init();
+    /* Initialize sub-modules */
+    PID_Init();          /* zero integral/derivative state               */
+    calState      = CAL_IDLE;
+    calibrated    = 0;   /* cleared at boot; set only after first cal    */
     Input_Init();
     UI_Init();
 }
@@ -305,17 +306,22 @@ void App_Update(void)
         Route_ButtonEvent(ev);
     }
 
-    /* Fast periodic updates per screen */
-    static uint32_t lastDisp = 0;
+    /* Fast periodic updates per screen
+     * Each screen has its own lastDisp so switching screens
+     * always triggers an immediate refresh on arrival.
+     */
+    static uint32_t lastDispRun  = 0;
+    static uint32_t lastDispDbg  = 0;
+    static uint32_t lastDispCal  = 0;
     uint32_t now = HAL_GetTick();
 
     if (currentScreen == SCR_RUNNING) {
-        /* Run PID controller every iteration */
+        /* Run PID controller every iteration (fast path) */
         PID_Update();
 
         /* Refresh display every 150 ms */
-        if ((now - lastDisp) >= 150u) {
-            lastDisp = now;
+        if ((now - lastDispRun) >= 150u) {
+            lastDispRun = now;
             UI_Refresh();
         }
     } else if (currentScreen == SCR_SENSOR_DEBUG) {
@@ -323,17 +329,17 @@ void App_Update(void)
         Sensor_ReadAll();
 
         /* Refresh display every 100 ms */
-        if ((now - lastDisp) >= 100u) {
-            lastDisp = now;
+        if ((now - lastDispDbg) >= 100u) {
+            lastDispDbg = now;
             UI_Refresh();
         }
     } else if (currentScreen == SCR_CALIBRATE) {
-        /* Update calibration state (reads sensors if in sweep) */
+        /* Update calibration (reads sensors / updates min-max during sweep) */
         Calibration_Update();
 
         /* Refresh display every 100 ms */
-        if ((now - lastDisp) >= 100u) {
-            lastDisp = now;
+        if ((now - lastDispCal) >= 100u) {
+            lastDispCal = now;
             UI_Refresh();
         }
     }

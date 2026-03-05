@@ -48,7 +48,8 @@ void Input_Update(void)
     /* ---- Enter button (short / long press) ---- */
     if (E) {
         if (enterDown == 0) {
-            enterDown = now;
+            /* Use (now | 1) so tick=0 never masquerades as "not pressed" */
+            enterDown = now ? now : 1u;
             enterHeld = 0;
         } else if (!enterHeld && (now - enterDown) >= BTN_LONG_MS) {
             enterHeld = 1;
@@ -62,16 +63,19 @@ void Input_Update(void)
         enterHeld = 0;
     }
 
-    /* ---- Left button ---- */
-    if (L && (now - lastL) >= BTN_DEBOUNCE_MS) {
-        lastL    = now;
-        lastEvent = BTN_LEFT;
-    }
-
-    /* ---- Right button ---- */
-    if (R && (now - lastR) >= BTN_DEBOUNCE_MS) {
-        lastR    = now;
-        lastEvent = BTN_RIGHT;
+    /* ---- Left / Right buttons ----
+     * Only update lastEvent when no higher-priority E event was already
+     * set this iteration, so a long-press cannot be silently overwritten
+     * if L or R happens to be physically held at the same time.
+     */
+    if (lastEvent == BTN_NONE) {
+        if (L && (now - lastL) >= BTN_DEBOUNCE_MS) {
+            lastL     = now;
+            lastEvent = BTN_LEFT;
+        } else if (R && (now - lastR) >= BTN_DEBOUNCE_MS) {
+            lastR     = now;
+            lastEvent = BTN_RIGHT;
+        }
     }
 }
 

@@ -35,11 +35,19 @@ typedef struct {
 } PIDConfig;
 
 /* ----------------------------------------------------------------
-   Public globals
+   Public globals — all defined in menu.c
    ---------------------------------------------------------------- */
 extern PIDConfig pid;
 extern AppScreen currentScreen;
 extern uint8_t   calibrated;
+
+/* UI cursor state */
+extern uint8_t   mainCursor;  /* 0–3: main menu page index            */
+extern uint8_t   pidCursor;   /* 0–4: PID field cursor (4 = SAVE)     */
+extern uint8_t   pidEdit;     /* 1 while editing a PID value          */
+
+/* Calibration state */
+extern uint8_t   calState;    /* CAL_IDLE / CAL_SWEEP                 */
 
 /* ----------------------------------------------------------------
    Public API — call from main.c
