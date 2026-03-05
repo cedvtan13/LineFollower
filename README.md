@@ -159,7 +159,7 @@ flowchart TD
     GPIO --> MOTOR
     GPIO --> INPUT
     I2C1 --> SSD1306
-    I2C3 -.-> ICM42688   %%% unused, dashed line
+    I2C3 -.-> ICM42688   %% unused, dashed line
     FLASH_INT --> FLASH
 
     %% Drivers → Modules
@@ -179,7 +179,7 @@ flowchart TD
     CAL --> SENSOR
     CAL --> MOTOR
 
-    SENSOR --> PID    %%% returns linePosition, raw values
+    SENSOR --> PID    %% returns linePosition, raw values
 
     %% main → menu
     MAIN --> MENU
