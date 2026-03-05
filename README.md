@@ -102,10 +102,13 @@ A **long press of E** from any screen returns immediately to the main menu and s
 
 ### 1. Main Menu (pages 1–4)
 
+Navigation uses the **L / R** buttons to cycle pages and **E** to confirm.  
+A **long press of E** from any screen returns immediately to the main menu and stops the motors.
+
 | Page | Content |
 |---|---|
 | 1/4 START RUN | Launches line-following. Blocked if not calibrated. Shows Kp/Kd/Speed/Cal status. |
-| 2/4 CALIBRATE | Enters the auto-calibration screen. |
+| 2/4 CALIBRATE | Place robot on track, press E — auto-spin starts immediately. |
 | 3/4 PID SETTINGS | Preview of current Kp/Ki/Kd/Speed. Press E to enter edit mode. |
 | 4/4 SENSOR DEBUG | Enters the live sensor value screen. |
 
@@ -121,20 +124,21 @@ Press **E** (short or long) to stop motors and return to main menu.
 
 ### 3. Calibration Screen (`SCR_CALIBRATE`)
 
-1. Place the robot on the track (sensors over both black line and white surface).
-2. Press **E** — the robot spins **clockwise** at a fixed speed (30%) for **5 seconds**.
-3. All 16 sensors record their minimum (white) and maximum (black) ADC values.
-4. Motors stop automatically. Thresholds are computed. Screen returns to main menu.
+1. Navigate to page **2/4 CALIBRATE** on the main menu.
+2. Place the robot on the track so the sensor array spans both the black line and white surface.
+3. Press **E** — the spin starts **immediately** (no second confirmation screen).
+4. The robot pivots **clockwise** at a fixed 30% speed for **5 seconds** while all 16 sensors continuously record their min and max ADC values.
+5. Motors stop automatically, per-channel thresholds are computed, and the display returns to the main menu with `Status:[CALIBRATED]`.
 
 During spin the display shows:
 - Live sensor bar (which sensors currently see the line)
-- Per-sensor confidence bar (filled block = that sensor has seen enough swing)
+- Per-sensor confidence bar (filled block = that channel has seen enough ADC swing)
 - `Ready: X/16` count
 - Countdown timer (`4.2s left`)
 
-Press **E or L** at any time to **abort** (motors stop, calibration data discarded).
+Press **E or L** at any time to **abort** (motors stop, calibration data discarded, no thresholds written).
 
-> **Note:** Calibration spin speed (30%) is fixed in `calibration.c` (`CAL_SPIN_SPEED`) and is independent of `pid.baseSpeed`.
+> **Note:** Calibration spin speed (30%) is a fixed constant `CAL_SPIN_SPEED` in `calibration.c` and is completely independent of `pid.baseSpeed`.
 
 ### 4. PID Tuning Screen (`SCR_PID`)
 
@@ -231,11 +235,23 @@ When `sensorActiveCount == 0` (no sensor sees the line):
 
 ## Auto-Calibration Details
 
+### Public API (`calibration.h`)
+
+| Function | Description |
+|---|---|
+| `Calibration_Start()` | Enables motors, starts clockwise spin, resets min/max accumulators |
+| `Calibration_Update()` | Called every loop — samples sensors, auto-finishes after `CAL_SPIN_MS` |
+| `Calibration_Abort()` | Stops motors, discards data, resets to `CAL_IDLE` |
+| `Calibration_IsDone()` | Returns 1 (once) when spin has finished and thresholds are written |
+| `Calibration_TimeRemaining()` | Milliseconds left in current spin (0 if not spinning) |
+
+### Internal flow
+
 - `Sensor_CalStart()` — resets per-channel `min` to 4095 and `max` to 0.
 - `Sensor_CalUpdate()` — called every loop during spin; updates running min/max per channel.
-- `Sensor_CalFinish()` — for each channel: `threshold = (min + max) / 2`. Channels with swing < 600 ADC counts fall back to the global threshold (useful for partially covered arrays).
+- `Sensor_CalFinish()` — called automatically when the timer expires: for each channel `threshold = (min + max) / 2`. Channels with ADC swing < 600 counts fall back to the global `SENSOR_THR_DEF`.
 - `sensorCalibrated = 1` after finish — `Sensor_ReadAll()` switches to per-channel thresholds automatically.
-- `Sensor_CalConfidence()` — returns count of channels with sufficient swing (shown on-screen during cal).
+- `Sensor_CalConfidence()` — count of channels with sufficient swing, shown on-screen during spin.
 
 ---
 
@@ -259,11 +275,13 @@ PIDConfig pid = {2.0f, 0.0f, 3.0f, 30};  // Kp, Ki, Kd, Speed%
 ### First Run
 
 1. Flash firmware. Robot displays main menu.
-2. Navigate to **CALIBRATE** (page 2/4). Place robot on track (sensors spanning black line and white background). Press **E**.
-3. Robot spins for 5 seconds. Watch the confidence bar fill up. All 16 bars should fill — if some don't, the sensors are not reaching both surfaces during the spin.
-4. After auto-return to main menu, `Cal: DONE` appears.
-5. Navigate to **PID** (page 3/4). Start with: `Kp=1.5`, `Ki=0.00`, `Kd=0.00`, `Speed=30`.
-6. Press **START RUN** (page 1/4).
+2. Navigate to **CALIBRATE** (page 2/4 with **R**).
+3. Place robot on track so sensors span both black line and white background.
+4. Press **E** — robot immediately starts spinning clockwise for 5 seconds.
+5. Watch the confidence bar fill — all 16 blocks should fill. If some don't, the array isn't reaching both surfaces during the spin.
+6. After auto-return to main menu, `Status:[CALIBRATED]` and `Cal: DONE` appear.
+7. Navigate to **PID** (page 3/4). Start with: `Kp=1.5`, `Ki=0.00`, `Kd=0.00`, `Speed=30`.
+8. Return to page 1/4 and press **E** to start running.
 
 ### Suggested Tuning Sequence
 
@@ -303,7 +321,18 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
 | `SENSOR_CURVE_EXTRA` | `sensor.h` | 500 | Extra position units per curved sensor step |
 | `SENSOR_THR_DEF` | `sensor.h` | 2048 | Global fallback ADC threshold (pre-calibration) |
 | `CAL_SPIN_MS` | `calibration.c` | 5000 | Calibration spin duration (ms) |
-| `CAL_SPIN_SPEED` | `calibration.c` | 30 | Calibration spin speed (%) |
+| `CAL_SPIN_SPEED` | `calibration.c` | 30 | Calibration spin speed (%) — independent of pid.baseSpeed |
 | `DERIV_ALPHA` | `pid_controller.c` | 0.35 | Derivative low-pass filter coefficient |
 | `CORNER_DROP` | `pid_controller.c` | 0.65 | Quadratic corner slowdown factor |
 | `MOTOR_DEADBAND` | `motor.c` | 150 | Minimum PWM tick to overcome motor stiction |
+
+---
+
+## Splash Screen (planned)
+
+A 128×64 1-bit bitmap can be shown on boot for 3 seconds before the main menu appears.
+To add one:
+1. Prepare a 128×64 black-and-white image.
+2. Convert it to a C byte array using **[image2cpp](https://javl.github.io/image2cpp/)** (Horizontal, 1 bit per pixel).
+3. Save the output as `Core/Inc/splash.h`.
+4. Call `ssd1306_DrawBitmap()` inside `App_Init()` followed by `HAL_Delay(3000)`.

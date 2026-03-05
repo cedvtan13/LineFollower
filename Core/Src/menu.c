@@ -98,9 +98,8 @@ static void Handle_MainMenu(ButtonEvent ev)
                     }
                     break;
 
-                case 1: /* CALIBRATE */
-                    /* Reset sweep state only — do NOT wipe calibrated flag */
-                    calState = CAL_IDLE;
+                case 1: /* CALIBRATE — start spin directly, no idle screen */
+                    Calibration_Start();
                     currentScreen = SCR_CALIBRATE;
                     UI_Refresh();
                     break;

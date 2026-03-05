@@ -47,7 +47,7 @@ static void UI_DrawMainMenu(void)
 
         ssd1306_DrawRect(8, 18, 119, 31);
         ssd1306_SetCursor(14, 3);
-        ssd1306_WriteString("  >>  START RUN  <<  ");
+        ssd1306_WriteString(">>  START RUN  <<");
 
         sprintf(buf, "Spd:%d%%", pid.baseSpeed);
         ssd1306_SetCursor(0, 5);
@@ -60,7 +60,7 @@ static void UI_DrawMainMenu(void)
             int kpF = (int)(fabsf(pid.Kp - (float)kpI) * 10.0f);
             int kdI = (int)pid.Kd;
             int kdF = (int)(fabsf(pid.Kd - (float)kdI) * 10.0f);
-            sprintf(buf, "Kp:%d.%d  Kd:%d.%d", kpI, kpF, kdI, kdF);
+            sprintf(buf, "Kp :%d.%d    Kd :%d.%d", kpI, kpF, kdI, kdF);
         }
         ssd1306_SetCursor(0, 6);
         ssd1306_WriteString(buf);
@@ -78,17 +78,14 @@ static void UI_DrawMainMenu(void)
         ssd1306_WriteString("[2/4]");
         ssd1306_DrawRect(0, 8, 127, 8);
 
-        ssd1306_SetCursor(0, 1);
-        ssd1306_WriteString("1. Hover over WHITE");
         ssd1306_SetCursor(0, 2);
-        ssd1306_WriteString("2. Press E to start");
+        ssd1306_WriteString("Place robot on track");
         ssd1306_SetCursor(0, 3);
-        ssd1306_WriteString("3. Sweep over BLACK");
-        ssd1306_SetCursor(0, 4);
-        ssd1306_WriteString("4. Press E when done");
-
+        ssd1306_WriteString("over black + white.");
+        ssd1306_SetCursor(0, 5);
+        ssd1306_WriteString("Robot spins 5s CW");
         ssd1306_SetCursor(0, 6);
-        ssd1306_WriteString(calibrated ? "Status: [CALIBRATED]" : "Status: [NOT DONE] ");
+        ssd1306_WriteString(calibrated ? "Status:[CALIBRATED]" : "Status:[NOT DONE]  ");
 
         ssd1306_SetCursor(0, 7);
         ssd1306_WriteString("< [2/4] >      E:GO");
@@ -105,19 +102,19 @@ static void UI_DrawMainMenu(void)
 
         {
             int i = (int)pid.Kp, f = (int)(fabsf(pid.Kp-(float)i)*100);
-            sprintf(buf, " Kp : %d.%02d", i, f);
+            sprintf(buf, " Kp    : %d.%02d", i, f);
         }
         ssd1306_SetCursor(0, 2); ssd1306_WriteString(buf);
 
         {
             int i = (int)pid.Ki, f = (int)(fabsf(pid.Ki-(float)i)*100);
-            sprintf(buf, " Ki : %d.%02d", i, f);
+            sprintf(buf, " Ki    : %d.%02d", i, f);
         }
         ssd1306_SetCursor(0, 3); ssd1306_WriteString(buf);
 
         {
             int i = (int)pid.Kd, f = (int)(fabsf(pid.Kd-(float)i)*100);
-            sprintf(buf, " Kd : %d.%02d", i, f);
+            sprintf(buf, " Kd    : %d.%02d", i, f);
         }
         ssd1306_SetCursor(0, 4); ssd1306_WriteString(buf);
 
