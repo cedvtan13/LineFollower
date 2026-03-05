@@ -21,7 +21,7 @@
 #include "sensor.h"
 #include "motor.h"
 #include "flash_storage.h"
-#include "ssd1306.h"
+#include "sh1106.h"
 #include "stm32f4xx_hal.h"
 #include <stdio.h>
 
@@ -84,10 +84,10 @@ static void Handle_MainMenu(ButtonEvent ev)
             switch (mainCursor) {
                 case 0: /* RUN */
                     if (!calibrated) {
-                        ssd1306_Clear();
-                        ssd1306_SetCursor(4, 3);
-                        ssd1306_WriteString("Calibrate first!");
-                        ssd1306_Display();
+                        sh1106_Clear();
+                        sh1106_SetCursor(4, 3);
+                        sh1106_WriteString("Calibrate first!");
+                        sh1106_Display();
                         HAL_Delay(1500);
                         UI_Refresh();
                     } else {
@@ -229,10 +229,10 @@ static void Handle_PID(ButtonEvent ev)
             if (pidCursor == 4) {
                 /* SAVE */
                 uint8_t ok = FlashStorage_Save(&pid);
-                ssd1306_Clear();
-                ssd1306_SetCursor(16, 3);
-                ssd1306_WriteString(ok ? "PID  SAVED!" : "SAVE FAILED");
-                ssd1306_Display();
+                sh1106_Clear();
+                sh1106_SetCursor(16, 3);
+                sh1106_WriteString(ok ? "PID  SAVED!" : "SAVE FAILED");
+                sh1106_Display();
                 HAL_Delay(1200);
                 UI_Refresh();
             } else {

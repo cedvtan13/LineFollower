@@ -3,7 +3,7 @@
  * SH1106 has a 132-column internal buffer; visible columns start at offset 2.
  * Page-addressing only — no horizontal auto-increment mode.
  */
-#include "ssd1306.h"
+#include "sh1106.h"
 #include <string.h>
 #include <stdint.h>
 
@@ -12,14 +12,14 @@ extern I2C_HandleTypeDef hi2c1;
 #define SH1106_ADDR     0x78   /* 0x3C << 1 — change to 0x7A if your board uses 0x3D */
 #define SH1106_COL_OFS  2      /* SH1106 visible area starts at internal column 2 */
 
-static void ssd1306_WriteCommand(uint8_t cmd) {
+static void sh1106_WriteCommand(uint8_t cmd) {
     uint8_t buf[2] = {0x00, cmd};
     if (HAL_I2C_Master_Transmit(&hi2c1, SH1106_ADDR, buf, 2, 100) != HAL_OK) {
         Error_Handler();
     }
 }
 
-static void ssd1306_WriteData(uint8_t data) {
+static void sh1106_WriteData(uint8_t data) {
     uint8_t buf[2] = {0x40, data};
     HAL_I2C_Master_Transmit(&hi2c1, SH1106_ADDR, buf, 2, 100);
 }
@@ -125,129 +125,129 @@ static const uint8_t font5x7[][5] = {
 };
 
 /* ---- Framebuffer: [page 0-7][col 0-127], 1 bit per pixel ---- */
-static uint8_t ssd1306_buf[8][128];
+static uint8_t sh1106_buf[8][128];
 static uint8_t curPage = 0, curCol = 0;
 
-void ssd1306_SendCommand(uint8_t cmd) {
-    ssd1306_WriteCommand(cmd);
+void sh1106_SendCommand(uint8_t cmd) {
+    sh1106_WriteCommand(cmd);
 }
 
-void ssd1306_SendData(uint8_t data) {
-    ssd1306_WriteData(data);
+void sh1106_SendData(uint8_t data) {
+    sh1106_WriteData(data);
 }
 
-void ssd1306_Init(void) {
+void sh1106_Init(void) {
     HAL_Delay(200);
 
-    ssd1306_WriteCommand(0xAE); // Display off
+    sh1106_WriteCommand(0xAE); // Display off
 
-    ssd1306_WriteCommand(0x02); // Set low column address (col 0 + 2 offset)
-    ssd1306_WriteCommand(0x10); // Set high column address
+    sh1106_WriteCommand(0x02); // Set low column address (col 0 + 2 offset)
+    sh1106_WriteCommand(0x10); // Set high column address
 
-    ssd1306_WriteCommand(0x40); // Set display start line to 0
+    sh1106_WriteCommand(0x40); // Set display start line to 0
 
-    ssd1306_WriteCommand(0x81); // Set contrast
-    ssd1306_WriteCommand(0x7F); // Mid contrast (0x00–0xFF)
+    sh1106_WriteCommand(0x81); // Set contrast
+    sh1106_WriteCommand(0x7F); // Mid contrast (0x00–0xFF)
 
-    ssd1306_WriteCommand(0xA1); // Segment remap: col 131 → SEG0 (flip horizontally)
-    ssd1306_WriteCommand(0xC8); // COM scan direction: reverse (flip vertically)
+    sh1106_WriteCommand(0xA1); // Segment remap: col 131 → SEG0 (flip horizontally)
+    sh1106_WriteCommand(0xC8); // COM scan direction: reverse (flip vertically)
 
-    ssd1306_WriteCommand(0xA6); // Normal display (not inverted)
+    sh1106_WriteCommand(0xA6); // Normal display (not inverted)
 
-    ssd1306_WriteCommand(0xA8); // Set multiplex ratio
-    ssd1306_WriteCommand(0x3F); // 1/64 duty (64 rows)
+    sh1106_WriteCommand(0xA8); // Set multiplex ratio
+    sh1106_WriteCommand(0x3F); // 1/64 duty (64 rows)
 
-    ssd1306_WriteCommand(0xD3); // Set display offset
-    ssd1306_WriteCommand(0x00); // No vertical offset
+    sh1106_WriteCommand(0xD3); // Set display offset
+    sh1106_WriteCommand(0x00); // No vertical offset
 
-    ssd1306_WriteCommand(0xD5); // Set display clock divide ratio / oscillator freq
-    ssd1306_WriteCommand(0x80); // Divide ratio = 1, freq = middle
+    sh1106_WriteCommand(0xD5); // Set display clock divide ratio / oscillator freq
+    sh1106_WriteCommand(0x80); // Divide ratio = 1, freq = middle
 
-    ssd1306_WriteCommand(0xD9); // Set pre-charge period
-    ssd1306_WriteCommand(0xF1); // Phase1 = 15 DCLKs, Phase2 = 1 DCLK
+    sh1106_WriteCommand(0xD9); // Set pre-charge period
+    sh1106_WriteCommand(0xF1); // Phase1 = 15 DCLKs, Phase2 = 1 DCLK
 
-    ssd1306_WriteCommand(0xDA); // Set COM pins hardware configuration
-    ssd1306_WriteCommand(0x12); // Alternative COM pin config
+    sh1106_WriteCommand(0xDA); // Set COM pins hardware configuration
+    sh1106_WriteCommand(0x12); // Alternative COM pin config
 
-    ssd1306_WriteCommand(0xDB); // Set VCOMH deselect level
-    ssd1306_WriteCommand(0x40);
+    sh1106_WriteCommand(0xDB); // Set VCOMH deselect level
+    sh1106_WriteCommand(0x40);
 
     /* SH1106 internal DC-DC charge pump (replaces SSD1306 0x8D/0x14) */
-    ssd1306_WriteCommand(0xAD); // DC-DC control mode
-    ssd1306_WriteCommand(0x8B); // Enable built-in DC-DC (0x8A = external VCC)
-    ssd1306_WriteCommand(0x30); // Pump voltage: 8.0 V (0x30–0x33)
+    sh1106_WriteCommand(0xAD); // DC-DC control mode
+    sh1106_WriteCommand(0x8B); // Enable built-in DC-DC (0x8A = external VCC)
+    sh1106_WriteCommand(0x30); // Pump voltage: 8.0 V (0x30–0x33)
 
-    ssd1306_WriteCommand(0xA4); // Output follows RAM content
+    sh1106_WriteCommand(0xA4); // Output follows RAM content
 
-    ssd1306_Clear();
-    ssd1306_Display();           /* flush blank framebuffer before turning on */
-    ssd1306_WriteCommand(0xAF); // Display on
+    sh1106_Clear();
+    sh1106_Display();           /* flush blank framebuffer before turning on */
+    sh1106_WriteCommand(0xAF); // Display on
 }
 
 /* SetCursor: x = pixel column 0-127, y = page 0-7 */
-void ssd1306_SetCursor(uint8_t x, uint8_t y) {
+void sh1106_SetCursor(uint8_t x, uint8_t y) {
     curCol  = (x < 128) ? x : 127;
     curPage = (y < 8)   ? y : 7;
 }
 
 /* WriteChar: writes into framebuffer at (curCol, curPage) */
-void ssd1306_WriteChar(char ch) {
+void sh1106_WriteChar(char ch) {
     if (ch < 32 || ch > 127) ch = 32;
     uint8_t idx = ch - 32;
     for (int i = 0; i < 5; i++) {
-        if (curCol < 128) ssd1306_buf[curPage][curCol++] = font5x7[idx][i];
+        if (curCol < 128) sh1106_buf[curPage][curCol++] = font5x7[idx][i];
     }
-    if (curCol < 128) ssd1306_buf[curPage][curCol++] = 0x00; /* 1-pixel gap */
+    if (curCol < 128) sh1106_buf[curPage][curCol++] = 0x00; /* 1-pixel gap */
 }
 
-void ssd1306_WriteString(char *str) {
+void sh1106_WriteString(const char *str) {
     while (*str) {
-        ssd1306_WriteChar(*str++);
+        sh1106_WriteChar(*str++);
     }
 }
 
-/* ssd1306_Clear: zero the framebuffer (call ssd1306_Display to push to screen) */
-void ssd1306_Clear(void) {
-    memset(ssd1306_buf, 0, sizeof(ssd1306_buf));
+/* sh1106_Clear: zero the framebuffer (call sh1106_Display to push to screen) */
+void sh1106_Clear(void) {
+    memset(sh1106_buf, 0, sizeof(sh1106_buf));
     curCol  = 0;
     curPage = 0;
 }
 
 /*
- * ssd1306_Display: flush the entire framebuffer to the SH1106 hardware.
+ * sh1106_Display: flush the entire framebuffer to the SH1106 hardware.
  * Must be called after clear + drawing to make changes visible.
  * Sends 128 bytes per page; the SH1106 column offset (+2) is applied here.
  */
-void ssd1306_Display(void) {
+void sh1106_Display(void) {
     static uint8_t lineBuf[129];
     lineBuf[0] = 0x40;  /* Co=0, D/C=1 → data stream */
     for (uint8_t page = 0; page < 8; page++) {
-        ssd1306_WriteCommand(0xB0 | page);
-        ssd1306_WriteCommand(0x10 | (SH1106_COL_OFS >> 4));   /* high nibble */
-        ssd1306_WriteCommand(0x00 | (SH1106_COL_OFS & 0x0F)); /* low  nibble */
-        memcpy(lineBuf + 1, ssd1306_buf[page], 128);
+        sh1106_WriteCommand(0xB0 | page);
+        sh1106_WriteCommand(0x10 | (SH1106_COL_OFS >> 4));   /* high nibble */
+        sh1106_WriteCommand(0x00 | (SH1106_COL_OFS & 0x0F)); /* low  nibble */
+        memcpy(lineBuf + 1, sh1106_buf[page], 128);
         HAL_I2C_Master_Transmit(&hi2c1, SH1106_ADDR, lineBuf, 129, 100);
     }
 }
 
 /* ---------- Pixel / shape helpers (operate on framebuffer) ---------- */
 
-void ssd1306_DrawPixel(uint8_t x, uint8_t y, uint8_t on) {
+void sh1106_DrawPixel(uint8_t x, uint8_t y, uint8_t on) {
     if (x >= 128 || y >= 64) return;
-    if (on) ssd1306_buf[y >> 3][x] |=  (1u << (y & 7));
-    else    ssd1306_buf[y >> 3][x] &= ~(1u << (y & 7));
+    if (on) sh1106_buf[y >> 3][x] |=  (1u << (y & 7));
+    else    sh1106_buf[y >> 3][x] &= ~(1u << (y & 7));
 }
 
 static void DrawHLine(uint8_t x, uint8_t y, uint8_t w) {
-    for (uint8_t i = 0; i < w; i++) ssd1306_DrawPixel(x + i, y, 1);
+    for (uint8_t i = 0; i < w; i++) sh1106_DrawPixel(x + i, y, 1);
 }
 
 static void DrawVLine(uint8_t x, uint8_t y, uint8_t h) {
-    for (uint8_t i = 0; i < h; i++) ssd1306_DrawPixel(x, y + i, 1);
+    for (uint8_t i = 0; i < h; i++) sh1106_DrawPixel(x, y + i, 1);
 }
 
 /* Draw hollow rectangle outline */
-void ssd1306_DrawRect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
+void sh1106_DrawRect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
     DrawHLine(x0, y0, x1 - x0 + 1);
     DrawHLine(x0, y1, x1 - x0 + 1);
     DrawVLine(x0, y0, y1 - y0 + 1);
@@ -255,8 +255,8 @@ void ssd1306_DrawRect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
 }
 
 /* Draw filled rectangle */
-void ssd1306_FillRect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
+void sh1106_FillRect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
     for (uint8_t y = y0; y <= y1; y++)
         for (uint8_t x = x0; x <= x1; x++)
-            ssd1306_DrawPixel(x, y, 1);
+            sh1106_DrawPixel(x, y, 1);
 }

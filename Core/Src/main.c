@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "ssd1306.h"
+#include "sh1106.h"
 #include "menu.h"
 /* USER CODE END Includes */
 

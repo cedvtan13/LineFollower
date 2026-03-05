@@ -1,9 +1,11 @@
 /*
  * ui.c  —  UI/display rendering
+ *
+ * Layout: row 0 = title, y=8 = 1px divider, rows 2-6 = content, row 7 = hint.
  */
 
 #include "ui.h"
-#include "ssd1306.h"
+#include "sh1106.h"
 #include "pid_controller.h"
 #include "calibration.h"
 #include "sensor.h"
@@ -11,20 +13,26 @@
 #include <string.h>
 #include <math.h>
 
-/* ================================================================
-   PRIVATE
-   ================================================================ */
-
 static char buf[32];
-
-/* ================================================================
-   HELPERS
-   ================================================================ */
 
 static void UI_WriteChar(char c)
 {
     char tmp[2] = {c, '\0'};
-    ssd1306_WriteString(tmp);
+    sh1106_WriteString(tmp);
+}
+
+/* Title row + thin 1px divider. page=0 → no page number. */
+static void DrawHeader(const char *title, uint8_t page)
+{
+    sh1106_SetCursor(0, 0);
+    sh1106_WriteString(title);
+    if (page) {
+        char pg[8];
+        sprintf(pg, "%d/4", page);
+        sh1106_SetCursor(110, 0);
+        sh1106_WriteString(pg);
+    }
+    sh1106_FillRect(0, 8, 127, 8); /* 1 px divider */
 }
 
 /* ================================================================
@@ -33,277 +41,200 @@ static void UI_WriteChar(char c)
 
 static void UI_DrawMainMenu(void)
 {
-    ssd1306_Clear();
+    sh1106_Clear();
 
     if (mainCursor == 0) {
-        /* ================================================
-         * PAGE 1/4 — START RUN
-         * ================================================ */
-        ssd1306_SetCursor(0, 0);
-        ssd1306_WriteString("LINE FOLLOWER");
-        ssd1306_SetCursor(90, 0);
-        ssd1306_WriteString("[1/4]");
-        ssd1306_DrawRect(0, 8, 127, 8);
-
-        ssd1306_DrawRect(8, 18, 119, 31);
-        ssd1306_SetCursor(14, 3);
-        ssd1306_WriteString(">>  START RUN  <<");
-
-        sprintf(buf, "Spd:%d%%", pid.baseSpeed);
-        ssd1306_SetCursor(0, 5);
-        ssd1306_WriteString(buf);
-        ssd1306_SetCursor(66, 5);
-        ssd1306_WriteString(calibrated ? "Cal: DONE" : "Cal: NONE");
+        DrawHeader("LINE FOLLOWER", 1);
 
         {
-            int kpI = (int)pid.Kp;
-            int kpF = (int)(fabsf(pid.Kp - (float)kpI) * 10.0f);
-            int kdI = (int)pid.Kd;
-            int kdF = (int)(fabsf(pid.Kd - (float)kdI) * 10.0f);
-            sprintf(buf, "Kp :%d.%d    Kd :%d.%d", kpI, kpF, kdI, kdF);
+            int kpI = (int)pid.Kp, kpF = (int)(fabsf(pid.Kp-(float)kpI)*10.0f);
+            int kdI = (int)pid.Kd, kdF = (int)(fabsf(pid.Kd-(float)kdI)*10.0f);
+            sprintf(buf, "Kp:%d.%d       Kd:%d.%d", kpI, kpF, kdI, kdF);
         }
-        ssd1306_SetCursor(0, 6);
-        ssd1306_WriteString(buf);
+        sh1106_SetCursor(0, 2); sh1106_WriteString(buf);
 
-        ssd1306_SetCursor(0, 7);
-        ssd1306_WriteString("< [1/4] >      E:GO");
+        {
+            int kiI = (int)pid.Ki, kiF = (int)(fabsf(pid.Ki-(float)kiI)*100.0f);
+            sprintf(buf, "Ki:%d.%02d      Spd:%d%%", kiI, kiF, pid.baseSpeed);
+        }
+        sh1106_SetCursor(0, 3); sh1106_WriteString(buf);
+
+        sh1106_SetCursor(0, 5);
+        sh1106_WriteString(calibrated ? "Cal: DONE" : "Cal: NOT DONE");
+
+        sh1106_SetCursor(0, 6);
+        sh1106_WriteString(">> PRESS E TO RUN <<");
+
+        sh1106_SetCursor(0, 7); sh1106_WriteString("< >              E:go");
 
     } else if (mainCursor == 1) {
-        /* ================================================
-         * PAGE 2/4 — CALIBRATE
-         * ================================================ */
-        ssd1306_SetCursor(0, 0);
-        ssd1306_WriteString("CALIBRATE");
-        ssd1306_SetCursor(90, 0);
-        ssd1306_WriteString("[2/4]");
-        ssd1306_DrawRect(0, 8, 127, 8);
+        DrawHeader("CALIBRATE", 2);
 
-        ssd1306_SetCursor(0, 2);
-        ssd1306_WriteString("Place robot on track");
-        ssd1306_SetCursor(0, 3);
-        ssd1306_WriteString("over black + white.");
-        ssd1306_SetCursor(0, 5);
-        ssd1306_WriteString("Robot spins 5s CW");
-        ssd1306_SetCursor(0, 6);
-        ssd1306_WriteString(calibrated ? "Status:[CALIBRATED]" : "Status:[NOT DONE]  ");
+        sh1106_SetCursor(0, 2); sh1106_WriteString("Place on track over");
+        sh1106_SetCursor(0, 3); sh1106_WriteString("black and white.");
+        sh1106_SetCursor(0, 5);
+        sh1106_WriteString(calibrated ? "Status: DONE" : "Status: NOT DONE");
+        sh1106_SetCursor(0, 6); sh1106_WriteString("Press E, spins CW 5s");
 
-        ssd1306_SetCursor(0, 7);
-        ssd1306_WriteString("< [2/4] >      E:GO");
+        sh1106_SetCursor(0, 7); sh1106_WriteString("< >              E:go");
 
     } else if (mainCursor == 2) {
-        /* ================================================
-         * PAGE 3/4 — PID PREVIEW
-         * ================================================ */
-        ssd1306_SetCursor(0, 0);
-        ssd1306_WriteString("PID SETTINGS");
-        ssd1306_SetCursor(90, 0);
-        ssd1306_WriteString("[3/4]");
-        ssd1306_DrawRect(0, 8, 127, 8);
+        DrawHeader("PID SETTINGS", 3);
 
-        {
-            int i = (int)pid.Kp, f = (int)(fabsf(pid.Kp-(float)i)*100);
-            sprintf(buf, " Kp    : %d.%02d", i, f);
-        }
-        ssd1306_SetCursor(0, 2); ssd1306_WriteString(buf);
+        {int i=(int)pid.Kp, f=(int)(fabsf(pid.Kp-(float)i)*100); sprintf(buf,"  Kp  %d.%02d",i,f);}
+        sh1106_SetCursor(0, 2); sh1106_WriteString(buf);
+        {int i=(int)pid.Ki, f=(int)(fabsf(pid.Ki-(float)i)*100); sprintf(buf,"  Ki  %d.%02d",i,f);}
+        sh1106_SetCursor(0, 3); sh1106_WriteString(buf);
+        {int i=(int)pid.Kd, f=(int)(fabsf(pid.Kd-(float)i)*100); sprintf(buf,"  Kd  %d.%02d",i,f);}
+        sh1106_SetCursor(0, 4); sh1106_WriteString(buf);
+        sprintf(buf, "  Spd %d%%", pid.baseSpeed);
+        sh1106_SetCursor(0, 5); sh1106_WriteString(buf);
 
-        {
-            int i = (int)pid.Ki, f = (int)(fabsf(pid.Ki-(float)i)*100);
-            sprintf(buf, " Ki    : %d.%02d", i, f);
-        }
-        ssd1306_SetCursor(0, 3); ssd1306_WriteString(buf);
-
-        {
-            int i = (int)pid.Kd, f = (int)(fabsf(pid.Kd-(float)i)*100);
-            sprintf(buf, " Kd    : %d.%02d", i, f);
-        }
-        ssd1306_SetCursor(0, 4); ssd1306_WriteString(buf);
-
-        sprintf(buf, " Speed : %d %%", pid.baseSpeed);
-        ssd1306_SetCursor(0, 5); ssd1306_WriteString(buf);
-
-        ssd1306_SetCursor(0, 7);
-        ssd1306_WriteString("< [3/4] >    E:EDIT");
+        sh1106_SetCursor(0, 7); sh1106_WriteString("< >           E:edit");
 
     } else {
-        /* ================================================
-         * PAGE 4/4 — SENSOR DEBUG
-         * ================================================ */
-        ssd1306_SetCursor(0, 0);
-        ssd1306_WriteString("SENSOR DEBUG");
-        ssd1306_SetCursor(90, 0);
-        ssd1306_WriteString("[4/4]");
-        ssd1306_DrawRect(0, 8, 127, 8);
+        DrawHeader("SENSOR DEBUG", 4);
 
-        ssd1306_SetCursor(0, 2);
-        ssd1306_WriteString("View raw ADC values");
-        ssd1306_SetCursor(0, 3);
-        ssd1306_WriteString("for all 16 sensors.");
-        ssd1306_SetCursor(0, 5);
-        ssd1306_WriteString("*=on line  .=off");
+        sh1106_SetCursor(0, 2); sh1106_WriteString("Raw 12-bit ADC values");
+        sh1106_SetCursor(0, 3); sh1106_WriteString("* = on line");
+        sh1106_SetCursor(0, 4); sh1106_WriteString(". = off line");
 
-        ssd1306_SetCursor(0, 7);
-        ssd1306_WriteString("< [4/4] >      E:GO");
+        sh1106_SetCursor(0, 7); sh1106_WriteString("< >              E:go");
     }
 }
 
 static void UI_DrawSensorDebug(void)
 {
-    ssd1306_Clear();
-
+    sh1106_Clear();
     for (uint8_t i = 0; i < 8; i++) {
         uint8_t j = i + 8;
         char line[22];
-        sprintf(line, "%2u:%04u%c %2u:%04u%c",
-                i,  sensorRaw[i],  sensorVal[i]  ? '*' : '.',
-                j,  sensorRaw[j],  sensorVal[j]  ? '*' : '.');
-        ssd1306_SetCursor(0, (uint8_t)i);
-        ssd1306_WriteString(line);
+        sprintf(line, " %2u:%04u%c  %2u:%04u%c",
+                i, sensorRaw[i], sensorVal[i] ? '*' : '.',
+                j, sensorRaw[j], sensorVal[j] ? '*' : '.');
+        sh1106_SetCursor(0, i);
+        sh1106_WriteString(line);
     }
 }
 
 static void UI_DrawRunning(void)
 {
-    ssd1306_Clear();
+    sh1106_Clear();
+    DrawHeader("RUNNING", 0);
+    sh1106_SetCursor(78, 0); sh1106_WriteString("E:STOP");
 
-    ssd1306_SetCursor(4, 0);
-    ssd1306_WriteString("RUNNING");
-    ssd1306_SetCursor(78, 0);
-    ssd1306_WriteString("E:STOP");
-    ssd1306_DrawRect(0, 8, 127, 8);
-
-    ssd1306_SetCursor(16, 1);
+    /* Sensor bar */
+    sh1106_SetCursor(4, 1);
+    sh1106_WriteString("L ");
     for (uint8_t i = 0; i < 16; i++)
         UI_WriteChar(sensorVal[15 - i] ? '*' : '.');
+    sh1106_WriteString(" R");
 
+    /* Position indicator bar (8px tall, row 2) */
+    sh1106_DrawRect(0, 16, 127, 23);
     {
-        ssd1306_DrawRect(0, 17, 127, 22);
         int32_t px = ((int32_t)linePosition + (int32_t)SENSOR_POS_MAX)
-                     * 123l / (2l * (int32_t)SENSOR_POS_MAX) + 2;
-        if (px < 2)   px = 2;
-        if (px > 125) px = 125;
-        ssd1306_FillRect((uint8_t)(px - 2), 18, (uint8_t)(px + 2), 21);
+                     * 122l / (2l * (int32_t)SENSOR_POS_MAX) + 3;
+        if (px < 4)   px = 4;
+        if (px > 123) px = 123;
+        sh1106_FillRect((uint8_t)(px - 3), 17, (uint8_t)(px + 3), 22);
     }
 
-    ssd1306_SetCursor(0, 3);
-    if      (linePosition < -(SENSOR_POS_MAX / 3)) ssd1306_WriteString("<<  LEFT             ");
-    else if (linePosition >  (SENSOR_POS_MAX / 3)) ssd1306_WriteString("            RIGHT  >>");
-    else                                            ssd1306_WriteString("    [  CENTRED  ]    ");
+    /* Direction */
+    sh1106_SetCursor(0, 3);
+    if      (linePosition < -(SENSOR_POS_MAX / 3)) sh1106_WriteString("<< LEFT             ");
+    else if (linePosition >  (SENSOR_POS_MAX / 3)) sh1106_WriteString("            RIGHT >>");
+    else                                            sh1106_WriteString("     [ CENTRED ]    ");
 
+    /* Error + speed */
     {
-        int   pos = linePosition >= 0 ? linePosition : -linePosition;
-        char  sgn = linePosition >= 0 ? '+' : '-';
-        sprintf(buf, "Err:%c%-4d", sgn, pos);
+        int  pos = linePosition >= 0 ? linePosition : -linePosition;
+        char sgn = linePosition >= 0 ? '+' : '-';
+        sprintf(buf, "Err:%c%-4d    Spd:%d%%", sgn, pos, pid.baseSpeed);
     }
-    ssd1306_SetCursor(0, 5);
-    ssd1306_WriteString(buf);
-    sprintf(buf, "Spd:%d%%", pid.baseSpeed);
-    ssd1306_SetCursor(78, 5);
-    ssd1306_WriteString(buf);
+    sh1106_SetCursor(0, 4);
+    sh1106_WriteString(buf);
 
-    ssd1306_SetCursor(0, 7);
-    ssd1306_WriteString("Hold E = STOP");
+    sh1106_SetCursor(0, 7); sh1106_WriteString("Hold E to stop");
 }
 
 static void UI_DrawCalibrate(void)
 {
-    ssd1306_Clear();
+    sh1106_Clear();
 
     if (calState == CAL_IDLE) {
-        ssd1306_SetCursor(4, 0);
-        ssd1306_WriteString("AUTO CALIBRATE");
+        DrawHeader("CALIBRATE", 0);
 
-        ssd1306_SetCursor(0, 2);
-        ssd1306_WriteString("Place robot on track");
-        ssd1306_SetCursor(0, 3);
-        ssd1306_WriteString("then press E.");
-        ssd1306_SetCursor(0, 5);
-        ssd1306_WriteString("Robot will spin CW");
-        ssd1306_SetCursor(0, 6);
-        ssd1306_WriteString("for 5 s to calibrate.");
+        sh1106_SetCursor(0, 2); sh1106_WriteString("Place on track over");
+        sh1106_SetCursor(0, 3); sh1106_WriteString("black and white.");
+        sh1106_SetCursor(0, 5); sh1106_WriteString("Robot spins CW 5s.");
 
-        ssd1306_SetCursor(0, 7);
-        ssd1306_WriteString("E=start    L=back");
+        sh1106_SetCursor(0, 7); sh1106_WriteString("E:start       L:back");
+
     } else {
-        /* CAL_SPIN — show live sensor bar + countdown */
-        ssd1306_SetCursor(16, 0);
-        ssd1306_WriteString("CALIBRATING...");
-
-        ssd1306_SetCursor(0, 1);
-        ssd1306_WriteString("L I15         I0 R");
-
-        ssd1306_SetCursor(16, 2);
-        for (uint8_t i = 0; i < 8; i++)
-            UI_WriteChar(sensorVal[15 - i] ? '*' : '.');
-        ssd1306_SetCursor(16, 3);
-        for (uint8_t i = 8; i < 16; i++)
-            UI_WriteChar(sensorVal[15 - i] ? '*' : '.');
-
-        ssd1306_DrawRect(0, 33, 127, 38);
-        for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
-            uint8_t ch = 15u - i;
-            uint16_t swing = (sensorCalMax[ch] > sensorCalMin[ch])
-                             ? (sensorCalMax[ch] - sensorCalMin[ch]) : 0u;
-            if (swing >= 600u) {
-                uint8_t x0 = (uint8_t)(i * 8);
-                uint8_t x1 = (uint8_t)(x0 + 7);
-                ssd1306_FillRect(x0, 34, x1, 37);
-            }
-        }
-
-        uint8_t ready = Sensor_CalConfidence();
-        sprintf(buf, "Ready:%2d/16", ready);
-        ssd1306_SetCursor(0, 5);
-        ssd1306_WriteString(buf);
-
-        /* Countdown timer (tenths of a second) */
         uint32_t ms  = Calibration_TimeRemaining();
         uint32_t sec = ms / 1000u;
         uint32_t ten = (ms % 1000u) / 100u;
-        sprintf(buf, "%lu.%lus left", sec, ten);
-        ssd1306_SetCursor(66, 5);
-        ssd1306_WriteString(buf);
 
-        ssd1306_SetCursor(0, 7);
-        ssd1306_WriteString("E/L = abort");
+        sh1106_SetCursor(0, 0); sh1106_WriteString("CALIBRATING...");
+        sprintf(buf, "%lu.%lus", sec, ten);
+        sh1106_SetCursor(93, 0); sh1106_WriteString(buf);
+        sh1106_FillRect(0, 8, 127, 8);
+
+        /* Sensor bar */
+        sh1106_SetCursor(4, 1);
+        sh1106_WriteString("L ");
+        for (uint8_t i = 0; i < 16; i++)
+            UI_WriteChar(sensorVal[15 - i] ? '*' : '.');
+        sh1106_WriteString(" R");
+
+        /* Confidence blocks (no outline — just the fills) */
+        for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+            uint8_t  ch    = 15u - i;
+            uint16_t swing = (sensorCalMax[ch] > sensorCalMin[ch])
+                             ? (sensorCalMax[ch] - sensorCalMin[ch]) : 0u;
+            if (swing >= 600u)
+                sh1106_FillRect((uint8_t)(i * 8), 16,
+                                (uint8_t)(i * 8 + 6), 25);
+        }
+
+        uint8_t ready = Sensor_CalConfidence();
+        sprintf(buf, "Ready: %d / 16", ready);
+        sh1106_SetCursor(0, 4); sh1106_WriteString(buf);
+
+        sh1106_SetCursor(0, 7); sh1106_WriteString("E / L = abort");
     }
 }
 
 static void UI_DrawPID(void)
 {
-    ssd1306_Clear();
+    sh1106_Clear();
+    DrawHeader("PID TUNING", 0);
 
-    ssd1306_SetCursor(4, 0);
-    ssd1306_WriteString("PID TUNING");
-    ssd1306_DrawRect(0, 8, 127, 8);
-
-    const char *labels[5] = {"Kp", "Ki", "Kd", "Spd", "SAV"};
+    const char *labels[5] = {"Kp ", "Ki ", "Kd ", "Spd", "   "};
     uint8_t     rows[5]   = {2, 3, 4, 5, 6};
 
     for (uint8_t i = 0; i < 5; i++) {
-        char cur = ' ';
-        if (i == pidCursor) cur = (pidEdit && i < 4) ? '*' : '>';
-        ssd1306_SetCursor(0, rows[i]);
-        UI_WriteChar(cur);
-        ssd1306_SetCursor(6, rows[i]);
+        char cur = (i == pidCursor) ? ((pidEdit && i < 4) ? '*' : '>') : ' ';
+        sh1106_SetCursor(0, rows[i]); UI_WriteChar(cur);
+        sh1106_SetCursor(8, rows[i]);
+
         if (i < 3) {
             float *v[3] = {&pid.Kp, &pid.Ki, &pid.Kd};
-            float  val  = *v[i];
-            int    ip   = (int)val;
-            int    fp   = (int)(fabsf(val - (float)ip) * 100.0f);
-            sprintf(buf, "%s : %d.%02d", labels[i], ip, fp);
+            int ip = (int)*v[i], fp = (int)(fabsf(*v[i]-(float)ip)*100.0f);
+            sprintf(buf, "%s %d.%02d", labels[i], ip, fp);
         } else if (i == 3) {
-            sprintf(buf, "%s: %d %%    ", labels[i], pid.baseSpeed);
+            sprintf(buf, "%s %d%%", labels[i], pid.baseSpeed);
         } else {
-            sprintf(buf, "[ SAVE TO FLASH ]");
+            sprintf(buf, "SAVE TO FLASH");
         }
-        ssd1306_WriteString(buf);
+        sh1106_WriteString(buf);
     }
 
-    ssd1306_SetCursor(0, 7);
-    if (pidCursor == 4)
-        ssd1306_WriteString("E = save to flash   ");
-    else
-        ssd1306_WriteString(pidEdit ? "L/R:change  E:done  " : "L/R:move  E:select  ");
+    sh1106_SetCursor(0, 7);
+    if      (pidCursor == 4) sh1106_WriteString("E = save to flash");
+    else if (pidEdit)        sh1106_WriteString("L/R:change  E:done");
+    else                     sh1106_WriteString("L/R:move    E:edit");
 }
 
 /* ================================================================
@@ -312,8 +243,8 @@ static void UI_DrawPID(void)
 
 void UI_Init(void)
 {
-    ssd1306_Init();
-    ssd1306_Clear();
+    sh1106_Init();
+    sh1106_Clear();
     UI_Refresh();
 }
 
@@ -326,5 +257,5 @@ void UI_Refresh(void)
         case SCR_PID:          UI_DrawPID();          break;
         case SCR_SENSOR_DEBUG: UI_DrawSensorDebug();  break;
     }
-    ssd1306_Display();
+    sh1106_Display();
 }

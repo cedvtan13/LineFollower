@@ -133,7 +133,7 @@ flowchart TD
 
     %% Driver Layer (low-level hardware abstraction)
     subgraph DRV [Drivers]
-        SSD1306["ssd1306.c<br/>SH1106 framebuffer<br/>I2C1"]
+        SSD1306["sh1106.c<br/>SH1106 framebuffer<br/>I2C1"]
         ICM42688["icm42688.c<br/>IMU driver<br/>(reserved, unused)"]
     end
 
@@ -197,7 +197,7 @@ flowchart TD
 | `input.c`            | Button debouncing, short/long press detection, event queue |
 | `ui.c`               | All OLED screen rendering                                |
 | `flash_storage.c`    | Save/load PID config to/from internal flash Sector 7     |
-| `ssd1306.c`          | Low‑level SH1106 I²C driver (page‑mode framebuffer)      |
+| `sh1106.c`           | Low‑level SH1106 I²C driver (page‑mode framebuffer)      |
 | `icm42688.c`         | ICM‑42688 IMU driver (reserved)                          |
 
 ---
@@ -347,32 +347,49 @@ leftSpeed  = effectiveBase + steering
 rightSpeed = effectiveBase - steering
 ```
 
-- **Derivative** is low‑pass filtered with `DERIV_ALPHA = 0.35` to reduce noise.
+- **Derivative** is low‑pass filtered with `DERIV_ALPHA = 0.28` to reduce noise (lower value damps wave-section ripple).
 - **Integral** is reset on error sign change to prevent windup and clamped to ±8×`SENSOR_POS_MAX`.
 
 ### Speed Management
 
-**Corner Slowdown (quadratic)**
+Three independent multipliers are applied to `baseSpeed`:
+
+**1. Positional corner slowdown (quadratic)**
 
 ```
-errNorm = |error| / SENSOR_POS_MAX       // 0.0–1.0
-scale   = max(1 − 0.65 × errNorm², 0.30)
+errNorm      = |error| / SENSOR_POS_MAX          // 0.0–1.0
+cornerScale  = max(1 − 0.72 × errNorm², 0.22)
 ```
 
-At 100% error → 35% of base speed. At 50% error → 84% of base speed. Never below 30%.
+At 100% error → 28% of base speed. At 50% error → 82%. Never below 22%.
 
-**Straight‑Line Boost**  
-When `errNorm < 0.12` (well centred), speed is boosted up to +20%.
+**2. Derivative brake — zigzag / W‑peak sections**
+
+```
+derivNorm   = |filtered_deriv| / SENSOR_POS_MAX  // 0.0–1.0
+derivScale  = max(1 − 0.60 × derivNorm², 0.35)
+```
+
+When the error is changing rapidly (sharp reversal peaks), this applies a second independent slowdown on top of the positional corner scale. The two effects multiply.
+
+**3. Straight‑line boost**  
+When `errNorm < 0.15` (well centred), speed is boosted up to +20%.
+
+```
+effectiveBase = baseSpeed × cornerScale × derivScale × boost
+```
 
 ### Lost‑Line Recovery
 
 When `sensorActiveCount == 0` (no sensor sees the line):
 
-| Phase      | Duration   | Behaviour                                 |
-|------------|------------|-------------------------------------------|
-| Coast      | 0–60 ms    | Hold last motor command (gap / cut mark)  |
-| Pivot      | 60–600 ms  | Slow pivot (18%) toward last‑known side   |
-| Hard brake | >600 ms    | Stop – fell off track or course end       |
+| Phase      | Duration    | Behaviour                                               |
+|------------|-------------|---------------------------------------------------------|
+| Coast      | 0–110 ms    | Hold last motor command – bridges dashed‑line gaps      |
+| Pivot      | 110–500 ms  | Pivot (22%) toward last‑known side                      |
+| Hard brake | >500 ms     | Stop – fell off track or course end                     |
+
+> The 110 ms coast window is sized to bridge the ~25 mm dashed‑rectangle gaps at ≥30% speed.
 
 ### Auto‑Calibration
 
@@ -464,15 +481,22 @@ If the robot cuts sharp corners, the curved sensors are reporting a position tha
 
 ## Compile‑Time Constants
 
-| Constant              | File                 | Default | Description                                    |
-|-----------------------|----------------------|---------|------------------------------------------------|
-| `SENSOR_CURVE_EXTRA`  | `sensor.h`           | 500     | Extra position units per curved sensor step    |
-| `SENSOR_THR_DEF`      | `sensor.h`           | 2048    | Global fallback ADC threshold (pre‑calibration)|
-| `CAL_SPIN_MS`         | `calibration.c`      | 5000    | Calibration spin duration (ms)                 |
-| `CAL_SPIN_SPEED`      | `calibration.c`      | 20      | Calibration spin speed (%)                     |
-| `DERIV_ALPHA`         | `pid_controller.c`   | 0.35    | Derivative low‑pass filter coefficient         |
-| `CORNER_DROP`         | `pid_controller.c`   | 0.65    | Quadratic corner slowdown factor               |
-| `MOTOR_DEADBAND`      | `motor.c`            | 150     | Minimum PWM tick to overcome motor stiction    |
+| Constant              | File                 | Default | Description                                         |
+|-----------------------|----------------------|---------|-----------------------------------------------------|
+| `SENSOR_CURVE_EXTRA`  | `sensor.h`           | 500     | Extra position units per curved sensor step         |
+| `SENSOR_THR_DEF`      | `sensor.h`           | 2048    | Global fallback ADC threshold (pre‑calibration)     |
+| `CAL_SPIN_MS`         | `calibration.c`      | 5000    | Calibration spin duration (ms)                      |
+| `CAL_SPIN_SPEED`      | `calibration.c`      | 20      | Calibration spin speed (%)                          |
+| `DERIV_ALPHA`         | `pid_controller.c`   | 0.28    | Derivative low‑pass filter (lower = smoother)       |
+| `CORNER_DROP`         | `pid_controller.c`   | 0.72    | Positional corner slowdown factor                   |
+| `CORNER_MIN`          | `pid_controller.c`   | 0.22    | Minimum positional speed scale (floor)              |
+| `DERIV_BRAKE_DROP`    | `pid_controller.c`   | 0.60    | Derivative brake drop factor (zigzag peaks)         |
+| `DERIV_BRAKE_MIN`     | `pid_controller.c`   | 0.35    | Minimum derivative brake scale (floor)              |
+| `STRAIGHT_THR`        | `pid_controller.c`   | 0.15    | Centred‑line threshold for straight boost           |
+| `CUT_COAST_MS`        | `pid_controller.c`   | 110     | Coast duration (ms) – bridges dashed‑line gaps      |
+| `CUT_SEARCH_MS`       | `pid_controller.c`   | 500     | Max pivot search duration before hard brake (ms)    |
+| `CUT_SEARCH_SPD`      | `pid_controller.c`   | 22      | Pivot search speed (%)                              |
+| `MOTOR_DEADBAND`      | `motor.c`            | 150     | Minimum PWM tick to overcome motor stiction         |
 
 ---
 
@@ -483,7 +507,7 @@ If the robot cuts sharp corners, the curved sensors are reporting a position tha
   1. Prepare a 128×64 black‑and‑white image.
   2. Convert it to a C byte array using [image2cpp](https://javl.github.io/image2cpp/) (Horizontal, 1 bit per pixel).
   3. Save the output as `Core/Inc/splash.h`.
-  4. Call `ssd1306_DrawBitmap()` inside `App_Init()` followed by `HAL_Delay(3000)`.
+  4. Call `sh1106_DrawBitmap()` inside `App_Init()` followed by `HAL_Delay(3000)`.
 
 - **IMU Integration** – Use the ICM‑42688 for hill detection or improved cornering.
 

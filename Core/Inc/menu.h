@@ -9,7 +9,7 @@
 #define INC_MENU_H_
 
 #include "main.h"
-#include "ssd1306.h"
+#include "sh1106.h"
 #include "sensor.h"     /* sensorVal[], sensorRaw[], linePosition, sensorThreshold */
 #include <stdint.h>
 

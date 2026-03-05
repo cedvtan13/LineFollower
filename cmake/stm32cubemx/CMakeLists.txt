@@ -26,7 +26,7 @@ set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/ui.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/input.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/flash_storage.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/ssd1306.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sh1106.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sensor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/motor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/icm42688.c
