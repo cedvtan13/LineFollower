@@ -201,7 +201,9 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_9;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;  /* ~2.24 μs at 25 MHz ADC clock: ample MUX signal settling */
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;  /* QRE1113 phototransistor has high output impedance (~10-100 kΩ);
+                                                       480 cycles = 20 µs at 24 MHz ADC clock gives the sample-hold
+                                                       capacitor enough time to charge through the MUX ON-resistance. */
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();

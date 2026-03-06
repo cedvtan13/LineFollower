@@ -107,11 +107,12 @@ static void UI_DrawSensorDebug(void)
 {
     sh1106_Clear();
     for (uint8_t i = 0; i < 8; i++) {
-        uint8_t j = i + 8;
+        uint8_t chL = i;
+        uint8_t chR = i + 8;
         char line[22];
-        sprintf(line, " %2u:%04u%c  %2u:%04u%c",
-                i, sensorRaw[i], sensorVal[i] ? '*' : '.',
-                j, sensorRaw[j], sensorVal[j] ? '*' : '.');
+        sprintf(line, "%2u:%04u%c  %2u:%04u%c",
+                chL, sensorRaw[chL], sensorVal[chL] ? '*' : '.',
+                chR, sensorRaw[chR], sensorVal[chR] ? '*' : '.');
         sh1106_SetCursor(0, i);
         sh1106_WriteString(line);
     }
@@ -123,11 +124,11 @@ static void UI_DrawRunning(void)
     DrawHeader("RUNNING", 0);
     sh1106_SetCursor(78, 0); sh1106_WriteString("E:STOP");
 
-    /* Sensor bar */
+    /* Sensor bar — all 16 sensors (ch=15..0, displayed left→right) */
     sh1106_SetCursor(4, 1);
     sh1106_WriteString("L ");
-    for (uint8_t i = 0; i < 16; i++)
-        UI_WriteChar(sensorVal[15 - i] ? '*' : '.');
+    for (int8_t ch = 15; ch >= 0; ch--)
+        UI_WriteChar(sensorVal[ch] ? '*' : '.');
     sh1106_WriteString(" R");
 
     /* Position indicator bar (8px tall, row 2) */
@@ -181,14 +182,14 @@ static void UI_DrawCalibrate(void)
         sh1106_SetCursor(93, 0); sh1106_WriteString(buf);
         sh1106_FillRect(0, 8, 127, 8);
 
-        /* Sensor bar */
+        /* Sensor bar — all 16 sensors (ch=15..0, displayed left→right) */
         sh1106_SetCursor(4, 1);
         sh1106_WriteString("L ");
-        for (uint8_t i = 0; i < 16; i++)
-            UI_WriteChar(sensorVal[15 - i] ? '*' : '.');
+        for (int8_t ch = 15; ch >= 0; ch--)
+            UI_WriteChar(sensorVal[ch] ? '*' : '.');
         sh1106_WriteString(" R");
 
-        /* Confidence blocks (no outline — just the fills) */
+        /* Confidence blocks — all 16 channels, 8 px each */
         for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
             uint8_t  ch    = 15u - i;
             uint16_t swing = (sensorCalMax[ch] > sensorCalMin[ch])

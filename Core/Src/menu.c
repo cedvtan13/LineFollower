@@ -200,9 +200,9 @@ static void Handle_PID(ButtonEvent ev)
         case BTN_LEFT:
             if (pidEdit) {
                 switch (pidCursor) {
-                    case 0: pid.Kp -= 0.1f;  if (pid.Kp < 0.0f) pid.Kp = 0.0f; break;
+                    case 0: pid.Kp -= 0.2f;  if (pid.Kp < 0.0f) pid.Kp = 0.0f; break;
                     case 1: pid.Ki -= 0.01f; if (pid.Ki < 0.0f) pid.Ki = 0.0f; break;
-                    case 2: pid.Kd -= 0.05f; if (pid.Kd < 0.0f) pid.Kd = 0.0f; break;
+                    case 2: pid.Kd -= 0.25f; if (pid.Kd < 0.0f) pid.Kd = 0.0f; break;
                     case 3: if (pid.baseSpeed >= 5) pid.baseSpeed -= 5; break;
                 }
             } else {
@@ -214,9 +214,9 @@ static void Handle_PID(ButtonEvent ev)
         case BTN_RIGHT:
             if (pidEdit) {
                 switch (pidCursor) {
-                    case 0: pid.Kp += 0.1f;  if (pid.Kp > 10.0f) pid.Kp = 10.0f; break;
+                    case 0: pid.Kp += 0.2f;  if (pid.Kp > 15.0f) pid.Kp = 15.0f; break;
                     case 1: pid.Ki += 0.01f; if (pid.Ki >  2.0f) pid.Ki =  2.0f; break;
-                    case 2: pid.Kd += 0.05f; if (pid.Kd >  5.0f) pid.Kd =  5.0f; break;
+                    case 2: pid.Kd += 0.25f; if (pid.Kd > 20.0f) pid.Kd = 20.0f; break;
                     case 3: if (pid.baseSpeed <= 95) pid.baseSpeed += 5; break;
                 }
             } else {
@@ -242,6 +242,16 @@ static void Handle_PID(ButtonEvent ev)
             break;
 
         case BTN_ENTER_LONG:
+            if (pidEdit) {
+                /* If you're currently editing a value, long-press exits edit mode */
+                pidEdit = 0;
+            } else {
+                /* If not editing, long-press goes back to main menu */
+                currentScreen = SCR_MAIN;
+                pidCursor = 0;   /* optional: reset cursor when you come back */
+            }
+            UI_Refresh();
+            break;
         case BTN_NONE:
         default:
             break;

@@ -30,9 +30,10 @@
 
 extern ADC_HandleTypeDef hadc1;
 
-uint8_t  sensorVal[SENSOR_COUNT]  = {0};
-uint16_t sensorRaw[SENSOR_COUNT]  = {0};
-int16_t  linePosition             = 0;
+uint8_t  sensorVal[SENSOR_COUNT]      = {0};
+uint16_t sensorRaw[SENSOR_COUNT]      = {0};
+uint16_t sensorFiltered[SENSOR_COUNT] = {0};  /* EMA-smoothed values */
+int16_t  linePosition                 = 0;
 uint16_t sensorThreshold          = SENSOR_THR_DEF;
 uint8_t  sensorActiveCount        = 0;   /* 0 = line lost */
 
@@ -78,7 +79,8 @@ static const int16_t SENS_POS[SENSOR_COUNT] = {
     (int16_t)(-7500 - 2*SENSOR_CURVE_EXTRA),  /* I15 curved-left  step 2 */
 };
 
-/* Minimum ADC swing per sensor to be considered calibrated. */
+/* Minimum ADC swing per sensor to be considered well-calibrated.
+ * At 1 mm height contrast is strong — 600 ADC swing is easily achieved. */
 #define CAL_MIN_SWING  600u
 
 /*
@@ -92,8 +94,8 @@ static void MUX_Select(uint8_t ch)
     HAL_GPIO_WritePin(MUX_S1_GPIO_Port, MUX_S1_Pin, (ch >> 1) & 1);
     HAL_GPIO_WritePin(MUX_S2_GPIO_Port, MUX_S2_Pin, (ch >> 2) & 1);
     HAL_GPIO_WritePin(MUX_S3_GPIO_Port, MUX_S3_Pin, (ch >> 3) & 1);
-    /* ~500 ns busy-wait at 100 MHz — just long enough for MUX to settle */
-    for (volatile int t = 0; t < 50; t++) { __NOP(); }
+    /* 10 µs delay @ 96 MHz = 960 cycles */
+    for (volatile int t = 0; t < 960; t++) { __NOP(); }
 }
 
 /*
@@ -102,6 +104,17 @@ static void MUX_Select(uint8_t ch)
  */
 static uint16_t ADC_ReadPB1(void)
 {
+    /* Dummy read 1 */
+    HAL_ADC_Start(&hadc1);
+    HAL_ADC_PollForConversion(&hadc1, 5);
+    HAL_ADC_GetValue(&hadc1);
+
+    /* Dummy read 2 (optional, but helps) */
+    HAL_ADC_Start(&hadc1);
+    HAL_ADC_PollForConversion(&hadc1, 5);
+    HAL_ADC_GetValue(&hadc1);
+
+    /* Real read */
     HAL_ADC_Start(&hadc1);
     if (HAL_ADC_PollForConversion(&hadc1, 5) != HAL_OK) return 0;
     return (uint16_t)HAL_ADC_GetValue(&hadc1);
@@ -112,9 +125,19 @@ void Sensor_ReadAll(void)
     for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
         MUX_Select(ch);
         sensorRaw[ch] = ADC_ReadPB1();
-        /* Use per-channel threshold if calibrated, global fallback otherwise */
+
+        /* Exponential moving average — smooths per-read noise from the
+         * high-impedance QRE1113 output.  Alpha=0.3 balances response speed
+         * vs. noise rejection.  On first call (filtered==0), seed with raw. */
+        if (sensorFiltered[ch] == 0)
+            sensorFiltered[ch] = sensorRaw[ch];
+        else
+            sensorFiltered[ch] = (uint16_t)(0.3f * (float)sensorRaw[ch]
+                                          + 0.7f * (float)sensorFiltered[ch]);
+
+        /* Threshold against filtered value — not raw — for stable sensorVal[] */
         uint16_t thr = sensorCalibrated ? calThr[ch] : sensorThreshold;
-        sensorVal[ch] = (sensorRaw[ch] > thr) ? 1u : 0u;
+        sensorVal[ch] = (sensorFiltered[ch] > thr) ? 1u : 0u;
     }
 }
 
@@ -135,15 +158,26 @@ int16_t Sensor_ComputePosition(void)
         for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
             uint16_t span = sensorCalMax[ch] - sensorCalMin[ch];
             if (span < CAL_MIN_SWING) continue;  /* skip uncalibrated sensor  */
-            float norm = (float)((int16_t)sensorRaw[ch] - (int16_t)sensorCalMin[ch])
+            float norm = (float)((int16_t)sensorFiltered[ch] - (int16_t)sensorCalMin[ch])
                          / (float)span;
-            if (norm < 0.05f) norm = 0.0f;   /* dead-zone: treat as white   */
-            else              active++;       /* counts above dead-zone once  */
+            if (norm < 0.25f) norm = 0.0f;   /* dead-zone: 25% — sensor must be clearly
+                                               * above white baseline before it counts.
+                                               * Rejects IR bleed onto adjacent white sensors
+                                               * at 1 mm height with QRE1113. */
+            else              active++;
             if (norm > 1.0f)  norm = 1.0f;
             weighted += norm * (float)SENS_POS[ch];
             total    += norm;
         }
-        if (total < 0.3f) {
+        if (total < 0.15f) {
+            /* Too little signal — line not seen (all white or lifted off surface) */
+            sensorActiveCount = 0;
+            return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
+        }
+        if (active >= 6) {
+            /* More than 5 sensors active — a 1-inch line at 8 mm pitch physically
+             * covers at most 3-4 sensors.  6+ firing means saturation or ambient
+             * IR flood, not a real line. */
             sensorActiveCount = 0;
             return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
         }
@@ -165,6 +199,12 @@ int16_t Sensor_ComputePosition(void)
             total++;
         }
         if (total == 0) {
+            /* All white — line not seen */
+            sensorActiveCount = 0;
+            return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
+        }
+        if (total >= 6) {
+            /* More than 5 sensors black — saturation, not a real 1-inch line */
             sensorActiveCount = 0;
             return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
         }
@@ -206,12 +246,11 @@ void Sensor_CalUpdate(void)
 void Sensor_CalFinish(void)
 {
     for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
-        if ((sensorCalMax[ch] - sensorCalMin[ch]) < CAL_MIN_SWING) {
-            /* Channel never saw a good swing — fall back to global threshold */
-            calThr[ch] = sensorThreshold;
-        } else {
-            calThr[ch] = (sensorCalMin[ch] + sensorCalMax[ch]) / 2u;
-        }
+        /* Always use the observed midpoint — never fall back to the fixed global
+         * threshold (2048).  The global value is wrong at any non-zero height.
+         * Even a narrow swing gives a better per-channel threshold than a
+         * hardcoded constant that may sit inside the white-surface range. */
+        calThr[ch] = (sensorCalMin[ch] + sensorCalMax[ch]) / 2u;
     }
     sensorCalibrated = 1;
 }

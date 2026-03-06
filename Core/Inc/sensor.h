@@ -12,7 +12,7 @@
  *   White surface: high reflection → HIGH current → LOW voltage → LOW ADC
  *   ON LINE when sensorRaw[i] > per-channel threshold (or global sensorThreshold if not yet cal'd)
  *
- * Position range: -7500 (line hard-left/I15) … 0 (centred) … +7500 (hard-right/I0)
+ * Position range: -8500 (line hard-left/I15) … 0 (centred) … +8500 (hard-right/I0)
  *
  * AUTO-CALIBRATION:
  *   1. Call Sensor_CalStart()  — resets min/max accumulators
@@ -51,12 +51,13 @@
 #define SENSOR_CURVE_EXTRA  500   /* extra reach per curved step (units)   */
 
 /* Maximum possible position returned by Sensor_ComputePosition().        */
-/* = position of I0 (or I15) when only that sensor is active.             */
+/* = position of I0 (or I15) when only that outermost sensor is active.   */
 #define SENSOR_POS_MAX  (7500 + 2 * SENSOR_CURVE_EXTRA)  /* = 8500 */
 
 /* Runtime state ----------------------------------------------------------- */
 extern uint8_t  sensorVal[SENSOR_COUNT];  /* 1 = on line, 0 = off line     */
 extern uint16_t sensorRaw[SENSOR_COUNT];  /* raw 12-bit ADC per channel     */
+extern uint16_t sensorFiltered[SENSOR_COUNT]; /* EMA-smoothed ADC per channel */
 extern int16_t  linePosition;             /* -POS_MAX … 0 … +POS_MAX          */
 extern uint16_t sensorThreshold;          /* global fallback threshold       */
 extern uint8_t  sensorActiveCount;        /* sensors contributing to fix (0 = line lost) */

@@ -34,9 +34,10 @@
    ================================================================ */
 
 /* Derivative low-pass filter.
- * Lower  = smoother (good for wave sections, reduces ripple amplification).
- * 0.28 vs previous 0.35. */
-#define DERIV_ALPHA       0.28f
+ * 0.40 at higher speeds: more responsive derivative so Kd acts in-phase
+ * and actually dampens oscillations rather than lagging behind them.
+ * (Was 0.28, tuned for wave sections at low speed.) */
+#define DERIV_ALPHA       0.40f
 
 /* Positional corner speed scaling (quadratic drop on |errNorm|).
  * 0.80 gives earlier braking at moderate errNorm so the robot slows
@@ -101,9 +102,16 @@ void PID_Init(void)
 
 void PID_Update(void)
 {
-    Sensor_ReadAll();
-    linePosition = Sensor_ComputePosition();
+    /* Rate-limit ADC scan to 5 ms (200 Hz).  Between scans, the last known
+     * sensorRaw/sensorFiltered values are reused.  PID computation still
+     * runs every loop iteration so motor updates remain fast. */
+    static uint32_t lastSensorMs = 0;
     uint32_t now = HAL_GetTick();
+    if (now - lastSensorMs >= 5u) {
+        Sensor_ReadAll();
+        lastSensorMs = now;
+    }
+    linePosition = Sensor_ComputePosition();
 
     /* ================================================================
        LOST-LINE / DASHED-LINE HANDLING

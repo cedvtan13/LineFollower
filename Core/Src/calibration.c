@@ -15,8 +15,8 @@
    CONFIGURATION
    ================================================================ */
 
-#define CAL_SPIN_MS     5000u   /* spin duration (ms)                        */
-#define CAL_SPIN_SPEED    20    /* clockwise pivot speed (%) — fixed, not pid */
+#define CAL_SPIN_MS     6000u   /* spin duration (ms)                        */
+#define CAL_SPIN_SPEED    10    /* clockwise pivot speed (%) — fixed, not pid */
 
 /* ================================================================
    PRIVATE STATE
