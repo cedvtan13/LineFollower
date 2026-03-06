@@ -28,7 +28,7 @@
 /* ================================================================
    PUBLIC GLOBALS (definitions — extern declared in menu.h)
    ================================================================ */
-PIDConfig pid            = {2.0f, 0.0f, 3.0f, 30};
+PIDConfig pid            = {4.0f, 0.0f, 5.0f, 25};
 AppScreen currentScreen  = SCR_MAIN;
 uint8_t   calibrated     = 0;
 

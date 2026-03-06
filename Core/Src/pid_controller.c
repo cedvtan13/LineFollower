@@ -39,8 +39,9 @@
 #define DERIV_ALPHA       0.28f
 
 /* Positional corner speed scaling (quadratic drop on |errNorm|).
- * Raised from 0.65→0.72 for 8-10 sharp 45-90° corners. */
-#define CORNER_DROP       0.72f
+ * 0.80 gives earlier braking at moderate errNorm so the robot slows
+ * before a corner rather than mid-corner. */
+#define CORNER_DROP       0.80f
 #define CORNER_MIN        0.22f   /* was 0.30 — allow deeper brake in tight spots */
 
 /* Extra speed penalty when |derivative| is large (zigzag W-peaks).
@@ -50,10 +51,10 @@
 #define DERIV_BRAKE_MIN   0.35f
 
 /* Straight-line boost.
- * Threshold widened to 0.15 (was 0.12): more of the 10+ straight
- * segments qualify and trigger the full boost. */
+ * Reduced to 1.08 — limits entry speed into corners while still
+ * giving a noticeable advantage on long straights. */
 #define STRAIGHT_THR      0.15f
-#define STRAIGHT_BOOST    1.20f
+#define STRAIGHT_BOOST    1.08f
 
 /* Lost-line / dashed-line recovery timings.
  * COAST extended to 110 ms to bridge the ~25 mm dashed-rectangle gaps
