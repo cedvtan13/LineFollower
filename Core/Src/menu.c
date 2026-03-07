@@ -1,358 +1,175 @@
 /*
- * menu.c  —  Application state machine coordinator
- *
- *  Created on: Feb 28, 2026
- *      Author: cvt
- *
- *  Architecture: flat 4-screen state machine coordinating:
- *    – pid_controller.c   PID control and motor output
- *    – calibration.c      Auto-calibration sweep
- *    – ui.c               Display rendering
- *    – input.c            Button debouncing and events
- *
- *  Delegates to specialized modules instead of monolithic code.
+ * menu.c  —  simple menu/state machine for run, PID, calibration, and debug
  */
 
 #include "menu.h"
-#include "pid_controller.h"
 #include "calibration.h"
-#include "ui.h"
 #include "input.h"
-#include "sensor.h"
 #include "motor.h"
-#include "flash_storage.h"
-#include "sh1106.h"
+#include "pid_controller.h"
+#include "sensor.h"
+#include "ui.h"
 #include "stm32f4xx_hal.h"
-#include <stdio.h>
 
-/* ================================================================
-   PUBLIC GLOBALS (definitions — extern declared in menu.h)
-   ================================================================ */
-PIDConfig pid            = {4.0f, 0.0f, 5.0f, 25};
-AppScreen currentScreen  = SCR_MAIN;
-uint8_t   calibrated     = 0;
+PIDConfig pid = {0.55f, 0.18f, 28u, 16u};
+AppScreen currentScreen = SCR_MAIN;
+uint8_t calibrated = 0;
+uint8_t mainCursor = 0;
+uint8_t pidCursor = 0;
+uint8_t pidEdit = 0;
+uint8_t calState = CAL_IDLE;
 
-uint8_t   mainCursor     = 0;   /* main menu page 0–3                */
-uint8_t   pidCursor      = 0;   /* PID cursor 0–4 (4 = SAVE)         */
-uint8_t   pidEdit        = 0;   /* 1 while editing a PID value       */
-
-uint8_t   calState       = CAL_IDLE;
-
-/* ================================================================
-   FORWARD DECLARATIONS
-   ================================================================ */
-
-static void Handle_MainMenu(ButtonEvent ev);
-static void Handle_Running(ButtonEvent ev);
-static void Handle_Calibrate(ButtonEvent ev);
-static void Handle_PID(ButtonEvent ev);
-static void Handle_SensorDebug(ButtonEvent ev);
-
-/* ================================================================
-   STATE MACHINE ROUTING
-   ================================================================ */
-
-static void Route_ButtonEvent(ButtonEvent ev)
-{
-    switch (currentScreen) {
-        case SCR_MAIN:         Handle_MainMenu(ev);    break;
-        case SCR_RUNNING:      Handle_Running(ev);     break;
-        case SCR_CALIBRATE:    Handle_Calibrate(ev);   break;
-        case SCR_PID:          Handle_PID(ev);         break;
-        case SCR_SENSOR_DEBUG: Handle_SensorDebug(ev); break;
-    }
-}
-
-/* ================================================================
-   MAIN MENU STATE HANDLER
-   ================================================================ */
-
-static void Handle_MainMenu(ButtonEvent ev)
+static void Handle_Main(ButtonEvent ev)
 {
     switch (ev) {
         case BTN_LEFT:
-            mainCursor = (mainCursor > 0) ? (mainCursor - 1) : 2;
+            mainCursor = (mainCursor > 0u) ? (uint8_t)(mainCursor - 1u) : 3u;
             UI_Refresh();
             break;
-
         case BTN_RIGHT:
-            mainCursor = (mainCursor < 2) ? (mainCursor + 1) : 0;
+            mainCursor = (mainCursor < 3u) ? (uint8_t)(mainCursor + 1u) : 0u;
             UI_Refresh();
             break;
-
         case BTN_ENTER_SHORT:
-            switch (mainCursor) {
-                case 0: /* RUN */
-                    PID_Reset();
-                    runStartMs = HAL_GetTick();
-                    Motor_Enable();
-                    currentScreen = SCR_RUNNING;
-                    UI_Refresh();
-                    break;
-
-                case 1: /* PID */
-                    currentScreen = SCR_PID;
-                    pidCursor = 0;
-                    pidEdit = 0;
-                    UI_Refresh();
-                    break;
-
-                case 2: /* SENSOR DEBUG */
-                    currentScreen = SCR_SENSOR_DEBUG;
-                    UI_Refresh();
-                    break;
+            if (mainCursor == 0u) {
+                PID_Reset();
+                runStartMs = HAL_GetTick();
+                Motor_Enable();
+                currentScreen = SCR_RUNNING;
+            } else if (mainCursor == 1u) {
+                currentScreen = SCR_PID;
+                pidCursor = 0u;
+                pidEdit = 0u;
+            } else if (mainCursor == 2u) {
+                currentScreen = SCR_CALIBRATE;
+            } else {
+                currentScreen = SCR_SENSOR_DEBUG;
             }
+            UI_Refresh();
             break;
-
-        case BTN_ENTER_LONG:
-        case BTN_NONE:
         default:
             break;
     }
 }
-
-/* ================================================================
-   RUNNING STATE HANDLER
-   ================================================================ */
 
 static void Handle_Running(ButtonEvent ev)
 {
-    switch (ev) {
-        case BTN_ENTER_SHORT:
-        case BTN_ENTER_LONG:
-            Motor_Stop();
-            PID_Reset();
-            /* Show run summary briefly before returning to main menu */
-            {
-                uint32_t sec = runElapsedMs / 1000u;
-                uint32_t ms  = runElapsedMs % 1000u;
-                char tmp[22];
-                sh1106_Clear();
-                sh1106_SetCursor(16, 2);
-                sh1106_WriteString("RUN STOPPED");
-                sprintf(tmp, "Time: %lu.%lus", sec, ms / 100u);
-                sh1106_SetCursor(16, 4);
-                sh1106_WriteString(tmp);
-                sh1106_Display();
-                HAL_Delay(1500);
-            }
-            currentScreen = SCR_MAIN;
-            UI_Refresh();
-            break;
-
-        case BTN_LEFT:
-        case BTN_RIGHT:
-        case BTN_NONE:
-        default:
-            break;
+    if (ev == BTN_ENTER_SHORT || ev == BTN_ENTER_LONG) {
+        Motor_Stop();
+        PID_Reset();
+        currentScreen = SCR_MAIN;
+        UI_Refresh();
     }
 }
-
-/* ================================================================
-   CALIBRATION STATE HANDLER
-   ================================================================ */
-
-static void Handle_Calibrate(ButtonEvent ev)
-{
-    switch (ev) {
-        case BTN_ENTER_SHORT:
-            if (calState == CAL_IDLE) {
-                /* Start the auto-spin sweep */
-                Calibration_Start();
-                UI_Refresh();
-            } else {
-                /* E during spin — abort immediately */
-                Calibration_Abort();
-                UI_Refresh();
-            }
-            break;
-
-        case BTN_LEFT:
-            if (calState == CAL_SPIN) {
-                Calibration_Abort();
-            } else {
-                currentScreen = SCR_MAIN;
-            }
-            UI_Refresh();
-            break;
-
-        case BTN_ENTER_LONG:
-            Calibration_Abort();
-            PID_Reset();
-            currentScreen = SCR_MAIN;
-            UI_Refresh();
-            break;
-
-        case BTN_RIGHT:
-        case BTN_NONE:
-        default:
-            break;
-    }
-}
-
-/* ================================================================
-   PID TUNING STATE HANDLER
-   ================================================================ */
 
 static void Handle_PID(ButtonEvent ev)
 {
-    switch (ev) {
-        case BTN_LEFT:
-            if (pidEdit) {
-                switch (pidCursor) {
-                    case 0: pid.Kp -= 0.2f;  if (pid.Kp < 0.0f) pid.Kp = 0.0f; break;
-                    case 1: pid.Ki -= 0.01f; if (pid.Ki < 0.0f) pid.Ki = 0.0f; break;
-                    case 2: pid.Kd -= 0.25f; if (pid.Kd < 0.0f) pid.Kd = 0.0f; break;
-                    case 3: if (pid.baseSpeed >= 5) pid.baseSpeed -= 5; break;
-                }
-            } else {
-                if (pidCursor > 0) pidCursor--;
-            }
-            UI_Refresh();
-            break;
+    if (ev == BTN_ENTER_LONG) {
+        pidEdit = 0u;
+        currentScreen = SCR_MAIN;
+        UI_Refresh();
+        return;
+    }
 
-        case BTN_RIGHT:
-            if (pidEdit) {
-                switch (pidCursor) {
-                    case 0: pid.Kp += 0.2f;  if (pid.Kp > 15.0f) pid.Kp = 15.0f; break;
-                    case 1: pid.Ki += 0.01f; if (pid.Ki >  2.0f) pid.Ki =  2.0f; break;
-                    case 2: pid.Kd += 0.25f; if (pid.Kd > 20.0f) pid.Kd = 20.0f; break;
-                    case 3: if (pid.baseSpeed <= 95) pid.baseSpeed += 5; break;
-                }
-            } else {
-                if (pidCursor < 4) pidCursor++;
-            }
-            UI_Refresh();
-            break;
+    if (ev == BTN_ENTER_SHORT) {
+        pidEdit = (uint8_t)!pidEdit;
+        UI_Refresh();
+        return;
+    }
 
-        case BTN_ENTER_SHORT:
-            if (pidCursor == 4) {
-                /* SAVE */
-                uint8_t ok = FlashStorage_Save(&pid);
-                sh1106_Clear();
-                sh1106_SetCursor(16, 3);
-                sh1106_WriteString(ok ? "PID  SAVED!" : "SAVE FAILED");
-                sh1106_Display();
-                HAL_Delay(1200);
-                UI_Refresh();
-            } else {
-                pidEdit = !pidEdit;
-                UI_Refresh();
-            }
-            break;
-
-        case BTN_ENTER_LONG:
-            if (pidEdit) {
-                /* If you're currently editing a value, long-press exits edit mode */
-                pidEdit = 0;
-            } else {
-                /* If not editing, long-press goes back to main menu */
-                currentScreen = SCR_MAIN;
-                pidCursor = 0;   /* optional: reset cursor when you come back */
-            }
+    if (!pidEdit) {
+        if (ev == BTN_LEFT) {
+            pidCursor = (pidCursor > 0u) ? (uint8_t)(pidCursor - 1u) : 3u;
             UI_Refresh();
-            break;
-        case BTN_NONE:
-        default:
-            break;
+        } else if (ev == BTN_RIGHT) {
+            pidCursor = (pidCursor < 3u) ? (uint8_t)(pidCursor + 1u) : 0u;
+            UI_Refresh();
+        }
+        return;
+    }
+
+    if (ev == BTN_LEFT) {
+        switch (pidCursor) {
+            case 0: pid.Kp -= 0.05f; if (pid.Kp < 0.0f) pid.Kp = 0.0f; break;
+            case 1: pid.Kd -= 0.05f; if (pid.Kd < 0.0f) pid.Kd = 0.0f; break;
+            case 2: if (pid.baseSpeed >= 5u) pid.baseSpeed -= 5u; break;
+            case 3: if (pid.turnSpeed >= 5u) pid.turnSpeed -= 5u; break;
+            default: break;
+        }
+        UI_Refresh();
+    } else if (ev == BTN_RIGHT) {
+        switch (pidCursor) {
+            case 0: pid.Kp += 0.05f; if (pid.Kp > 10.0f) pid.Kp = 10.0f; break;
+            case 1: pid.Kd += 0.05f; if (pid.Kd > 10.0f) pid.Kd = 10.0f; break;
+            case 2: if (pid.baseSpeed <= 95u) pid.baseSpeed += 5u; break;
+            case 3: if (pid.turnSpeed <= 95u) pid.turnSpeed += 5u; break;
+            default: break;
+        }
+        UI_Refresh();
     }
 }
 
-/* ================================================================
-   SENSOR DEBUG STATE HANDLER
-   ================================================================ */
+static void Handle_Calibrate(ButtonEvent ev)
+{
+    if (ev == BTN_ENTER_SHORT) {
+        if (calState == CAL_IDLE) Calibration_Start();
+        else Calibration_Abort();
+        UI_Refresh();
+    } else if (ev == BTN_ENTER_LONG || ev == BTN_LEFT) {
+        Calibration_Abort();
+        currentScreen = SCR_MAIN;
+        UI_Refresh();
+    }
+}
 
 static void Handle_SensorDebug(ButtonEvent ev)
 {
-    switch (ev) {
-        case BTN_ENTER_SHORT:
-        case BTN_LEFT:
-            currentScreen = SCR_MAIN;
-            UI_Refresh();
-            break;
-
-        case BTN_RIGHT:
-        case BTN_ENTER_LONG:
-        case BTN_NONE:
-        default:
-            break;
+    if (ev == BTN_LEFT || ev == BTN_ENTER_SHORT || ev == BTN_ENTER_LONG) {
+        currentScreen = SCR_MAIN;
+        UI_Refresh();
     }
 }
-
-/* ================================================================
-   PUBLIC API
-   ================================================================ */
 
 void App_Init(void)
 {
-    /* Load PID from flash (if previously saved) */
-    FlashStorage_Load(&pid);
-
-    /* Initialize sub-modules */
-    PID_Init();          /* zero integral/derivative state               */
-    calState      = CAL_IDLE;
-    calibrated    = 0;   /* cleared at boot; set only after first cal    */
     Input_Init();
+    Calibration_Init();
+    PID_Init();
     UI_Init();
 }
 
-/*
- * Call this every iteration of while(1) in main.c.
- * – Reads buttons and dispatches state handlers
- * – In SCR_RUNNING: runs PID every call, refreshes display every 150 ms
- * – In SCR_CALIBRATE: runs calibration update every call, refreshes display every 100 ms
- * – In SCR_SENSOR_DEBUG: reads sensors continuously, refreshes display every 100 ms
- */
 void App_Update(void)
 {
-    /* Update button input */
-    Input_Update();
-    ButtonEvent ev = Input_GetEvent();
+    static uint32_t lastUiMs = 0;
+    uint32_t now = HAL_GetTick();
+    ButtonEvent ev;
 
-    /* Handle button events with state-specific logic */
-    if (ev != BTN_NONE) {
-        Route_ButtonEvent(ev);
+    Input_Update();
+    ev = Input_GetEvent();
+
+    switch (currentScreen) {
+        case SCR_MAIN:         Handle_Main(ev); break;
+        case SCR_RUNNING:      Handle_Running(ev); break;
+        case SCR_PID:          Handle_PID(ev); break;
+        case SCR_CALIBRATE:    Handle_Calibrate(ev); break;
+        case SCR_SENSOR_DEBUG: Handle_SensorDebug(ev); break;
     }
 
-    /* Fast periodic updates per screen
-     * Each screen has its own lastDisp so switching screens
-     * always triggers an immediate refresh on arrival.
-     */
-    static uint32_t lastDispRun  = 0;
-    static uint32_t lastDispDbg  = 0;
-    static uint32_t lastDispCal  = 0;
-    uint32_t now = HAL_GetTick();
-
     if (currentScreen == SCR_RUNNING) {
-        /* Run PID controller every iteration (fast path) */
         PID_Update();
-
-        /* Refresh display every 150 ms */
-        if ((now - lastDispRun) >= 150u) {
-            lastDispRun = now;
-            UI_Refresh();
-        }
     } else if (currentScreen == SCR_SENSOR_DEBUG) {
-        /* Read all 16 sensors continuously */
         Sensor_ReadAll();
-
-        /* Refresh display every 100 ms */
-        if ((now - lastDispDbg) >= 100u) {
-            lastDispDbg = now;
-            UI_Refresh();
-        }
+        linePosition = Sensor_ComputePosition();
     } else if (currentScreen == SCR_CALIBRATE) {
-        /* Update calibration (reads sensors / drives motors during spin) */
         Calibration_Update();
-
-        /* Auto-finish: motor already stopped inside Calibration_Update */
         if (Calibration_IsDone()) {
-            calibrated    = 1;
+            calibrated = 1u;
             currentScreen = SCR_MAIN;
-            UI_Refresh();
-        } else if ((now - lastDispCal) >= 100u) {
-            lastDispCal = now;
-            UI_Refresh();
         }
+    }
+
+    if ((now - lastUiMs) >= 100u || ev != BTN_NONE) {
+        lastUiMs = now;
+        UI_Refresh();
     }
 }

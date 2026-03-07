@@ -1,28 +1,16 @@
 /*
  * sensor.c  —  CD74HC4067SM 16-channel MUX + TCRT5000 IR sensor array
  *
- * POSITION CALCULATION  (updated for non-uniform geometry)
- * ----------------------------------------------------------
  * Physical layout (I0 = rightmost):
  *   I0,  I1       — curved to the right  (extra reach vs straight pitch)
  *   I2  … I13   — straight centre,  8 mm pitch  (1000 units/step)
  *   I14, I15     — curved to the left   (extra reach vs straight pitch)
  *
- * SENSOR_CURVE_EXTRA extra units are added per curved step so the
- * position table reflects the real physical detection point rather
- * than treating the array as uniformly spaced.
- *
- * TWO MODES
- * ---------
- * After auto-calibration (sensorCalibrated = 1):
- *   Analog-weighted average — each sensor contributes a continuous
- *   0.0–1.0 intensity (normalised by its own calMin/calMax).  Gives
- *   sub-sensor resolution and eliminates the 1000-unit stepping that
- *   binary thresholding produces.  PID works on smooth, continuous data.
- *
- * Without calibration:
- *   Binary-weighted average using the same physical position table.
- *   Better than the old uniform-step formula but still 1000-unit steps.
+ * POSITION CALCULATION
+ * ---------------------
+ * Binary weighted average: sensors above their threshold (per-channel after
+ * calibration, SENSOR_THR_DEF before) are treated as ON.  The position is
+ * the mean of the physical position values of all active sensors.
  */
 
 #include "sensor.h"
@@ -104,15 +92,15 @@ static void MUX_Select(uint8_t ch)
  */
 static uint16_t ADC_ReadPB1(void)
 {
-    /* Dummy read 1 */
-    HAL_ADC_Start(&hadc1);
-    HAL_ADC_PollForConversion(&hadc1, 5);
-    HAL_ADC_GetValue(&hadc1);
-
-    /* Dummy read 2 (optional, but helps) */
-    HAL_ADC_Start(&hadc1);
-    HAL_ADC_PollForConversion(&hadc1, 5);
-    HAL_ADC_GetValue(&hadc1);
+    /* 4 dummy reads before the real one.
+     * TCRT5000/QRE1113 output impedance can reach 1 MΩ at low light levels.
+     * τ = 1 MΩ × 4 pF (S/H cap) = 4 µs → 8τ = 32 µs needed for 12-bit settling.
+     * Each conversion at 480 ADC cycles @ 24 MHz = ~20.5 µs.
+     * 4 dummies = ~82 µs total settle budget — covers up to ~2 MΩ source. */
+    HAL_ADC_Start(&hadc1); HAL_ADC_PollForConversion(&hadc1, 5); HAL_ADC_GetValue(&hadc1);
+    HAL_ADC_Start(&hadc1); HAL_ADC_PollForConversion(&hadc1, 5); HAL_ADC_GetValue(&hadc1);
+    HAL_ADC_Start(&hadc1); HAL_ADC_PollForConversion(&hadc1, 5); HAL_ADC_GetValue(&hadc1);
+    HAL_ADC_Start(&hadc1); HAL_ADC_PollForConversion(&hadc1, 5); HAL_ADC_GetValue(&hadc1);
 
     /* Real read */
     HAL_ADC_Start(&hadc1);
@@ -125,6 +113,16 @@ void Sensor_ReadAll(void)
     uint16_t mn = 4095u, mx = 0u;
 
     for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
+        /* Channels 0 and 15 are the outermost curved sensors.
+         * Ch 0 is physically broken; ch 15 is excluded for symmetry.
+         * Zero their state so they never contribute to position. */
+        if (ch == 0 || ch == 15) {
+            sensorRaw[ch]      = 0u;
+            sensorFiltered[ch] = 0u;
+            sensorVal[ch]      = 0u;
+            continue;
+        }
+
         MUX_Select(ch);
         sensorRaw[ch] = ADC_ReadPB1();
 
@@ -141,104 +139,51 @@ void Sensor_ReadAll(void)
         if (sensorFiltered[ch] > mx) mx = sensorFiltered[ch];
     }
 
-    /* Compute sensorVal[] using the same threshold logic as
-     * Sensor_ComputePosition so the debug screen always matches
-     * what the PID actually sees. */
-    uint16_t liveThr = (!sensorCalibrated && (mx - mn) > 200u)
+    /* Threshold: use per-channel cal midpoint when calibrated, otherwise
+     * SENSOR_THR_DEF unless a real line is visible (span >= 1000 means black
+     * is present; white-only variation is only ~300 counts). */
+    uint16_t liveThr = (!sensorCalibrated && (mx - mn) >= 1000u)
                        ? (mn + mx) / 2u
                        : sensorThreshold;
 
     for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
-        uint16_t thr = sensorCalibrated ? calThr[ch] : liveThr;
-        sensorVal[ch] = (sensorFiltered[ch] > thr) ? 1u : 0u;
+        if (sensorCalibrated
+            && (sensorCalMax[ch] - sensorCalMin[ch]) < CAL_MIN_SWING) {
+            sensorVal[ch] = 0u;  /* low-swing sensor — never report on-line */
+        } else {
+            uint16_t thr = sensorCalibrated ? calThr[ch] : liveThr;
+            sensorVal[ch] = (sensorFiltered[ch] > thr) ? 1u : 0u;
+        }
     }
 }
 
 int16_t Sensor_ComputePosition(void)
 {
-    if (sensorCalibrated) {
-        /*
-         * ANALOG MODE (post-calibration)
-         * --------------------------------
-         * Each sensor contributes a continuous 0.0–1.0 intensity:
-         *   0.0 = pure white (at calMin floor)
-         *   1.0 = black line (at calMax ceiling)
-         * A 5% dead-zone at the bottom discards noise on fully white sensors.
-         * This yields sub-sensor resolution and smooth PID input.
-         */
-        float weighted = 0.0f, total = 0.0f;
-        uint8_t active = 0;
-        for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
-            uint16_t span = sensorCalMax[ch] - sensorCalMin[ch];
-            if (span < CAL_MIN_SWING) continue;  /* skip uncalibrated sensor  */
-            float norm = (float)((int16_t)sensorFiltered[ch] - (int16_t)sensorCalMin[ch])
-                         / (float)span;
-            if (norm < 0.25f) norm = 0.0f;   /* dead-zone: 25% — sensor must be clearly
-                                               * above white baseline before it counts.
-                                               * Rejects IR bleed onto adjacent white sensors
-                                               * at 1 mm height with QRE1113. */
-            else              active++;
-            if (norm > 1.0f)  norm = 1.0f;
-            weighted += norm * (float)SENS_POS[ch];
-            total    += norm;
-        }
-        if (total < 0.15f) {
-            /* Too little signal — line not seen (all white or lifted off surface) */
-            sensorActiveCount = 0;
-            return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
-        }
-        if (active >= 6) {
-            /* More than 5 sensors active — a 1-inch line at 8 mm pitch physically
-             * covers at most 3-4 sensors.  6+ firing means saturation or ambient
-             * IR flood, not a real line. */
-            sensorActiveCount = 0;
-            return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
-        }
-        sensorActiveCount = active;
-        linePosition = (int16_t)(weighted / total);
-        return linePosition;
-    } else {
-        /*
-         * CONFIDENCE-WEIGHTED MODE (before calibration)
-         * -----------------------------------------------
-         * Instead of a fixed 2048 threshold, compute a per-frame midpoint
-         * liveThr = (min + max) / 2.  Sensors above the threshold contribute
-         * a confidence weight proportional to how far above the threshold
-         * they are.  This gives sub-sensor resolution even without cal data
-         * (inspired by the Teensy maze-solver's confidence scoring).
-         */
-        uint16_t mn = 4095u, mx = 0u;
-        for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
-            if (sensorFiltered[ch] < mn) mn = sensorFiltered[ch];
-            if (sensorFiltered[ch] > mx) mx = sensorFiltered[ch];
-        }
-        uint16_t span = mx - mn;
-        uint16_t liveThr = (span > 200u) ? (mn + mx) / 2u : SENSOR_THR_DEF;
+    /* Binary weighted average — use sensorVal[] already computed by Sensor_ReadAll(). */
+    int32_t weighted = 0;
+    uint8_t active   = 0;
 
-        float weighted = 0.0f, total = 0.0f;
-        uint8_t active = 0;
-        for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
-            if (sensorFiltered[ch] <= liveThr) continue;
-            /* Confidence = how far above threshold, normalised 0..1 */
-            float conf = (span > 200u)
-                       ? (float)(sensorFiltered[ch] - liveThr) / (float)(mx - liveThr)
-                       : 1.0f;  /* fallback: equal weight */
-            weighted += conf * (float)SENS_POS[ch];
-            total    += conf;
+    for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
+        if (sensorVal[ch]) {
+            if (ch == 0 || ch == 15) continue;  /* excluded channels */
+            weighted += SENS_POS[ch];
             active++;
         }
-        if (total < 0.01f) {
-            sensorActiveCount = 0;
-            return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
-        }
-        if (active >= 6) {
-            sensorActiveCount = 0;
-            return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
-        }
-        sensorActiveCount = active;
-        linePosition = (int16_t)(weighted / total);
-        return linePosition;
     }
+
+    if (active == 0) {
+        sensorActiveCount = 0;
+        return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
+    }
+    if (active >= 10) {
+        /* 10+ sensors on — IR flood or robot lifted off surface. */
+        sensorActiveCount = 0;
+        return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
+    }
+
+    sensorActiveCount = active;
+    linePosition = (int16_t)(weighted / (int32_t)active);
+    return linePosition;
 }
 
 /* ==========================================================================
@@ -259,6 +204,12 @@ void Sensor_CalStart(void)
 void Sensor_CalUpdate(void)
 {
     for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
+        if (ch == 0 || ch == 15) {
+            sensorRaw[ch]      = 0u;
+            sensorFiltered[ch] = 0u;
+            sensorVal[ch]      = 0u;
+            continue;
+        }
         MUX_Select(ch);
         uint16_t raw = ADC_ReadPB1();
         sensorRaw[ch] = raw;
@@ -282,11 +233,17 @@ void Sensor_CalUpdate(void)
 void Sensor_CalFinish(void)
 {
     for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
-        /* Always use the observed midpoint — never fall back to the fixed global
-         * threshold (2048).  The global value is wrong at any non-zero height.
-         * Even a narrow swing gives a better per-channel threshold than a
-         * hardcoded constant that may sit inside the white-surface range. */
-        calThr[ch] = (sensorCalMin[ch] + sensorCalMax[ch]) / 2u;
+        /* Threshold at 65% of span rather than midpoint (50%).
+         * Tarpaulin white surfaces have variable reflectivity — glossy patches
+         * can read 1500+ vs normal 700-1000.  A higher threshold demands a
+         * reading be 65% of the way from white to black before it counts,
+         * preventing false on-line detections from bright white noise.
+         *
+         * Example: min=700, max=4000, span=3300
+         *   Old midpoint: 2350  → noisy white at 1500 is 48%, close to trigger
+         *   New 65%:      2845  → noisy white needs to reach 2845, safe margin */
+        uint16_t span = sensorCalMax[ch] - sensorCalMin[ch];
+        calThr[ch] = sensorCalMin[ch] + (uint16_t)((uint32_t)span * 65u / 100u);
     }
     sensorCalibrated = 1;
 

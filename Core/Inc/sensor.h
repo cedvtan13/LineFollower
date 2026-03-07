@@ -4,15 +4,15 @@
  * MUX wiring:
  *   S0 = PB0    S1 = PA7    S2 = PA6    S3 = PA5   (channel select, outputs)
  *   SIG = PB1   (common I/O → ADC1_CH9)
- *   I0  = rightmost sensor (positive position side)
- *   I15 = leftmost  sensor (negative position side)
+ *   I0  = rightmost sensor (positive position side, excluded)
+ *   I15 = leftmost  sensor (negative position side, excluded)
  *
  * ADC: 12-bit, 0–4095.
  *   Black line: high IR absorption → low phototransistor current → HIGH voltage → HIGH ADC
  *   White surface: high reflection → HIGH current → LOW voltage → LOW ADC
  *   ON LINE when sensorRaw[i] > per-channel threshold (or global sensorThreshold if not yet cal'd)
  *
- * Position range: -8500 (line hard-left/I15) … 0 (centred) … +8500 (hard-right/I0)
+ * Active position range: -7000 (line hard-left/I14) … 0 (centred) … +7000 (hard-right/I1)
  *
  * AUTO-CALIBRATION:
  *   1. Call Sensor_CalStart()  — resets min/max accumulators
@@ -29,7 +29,7 @@
 #include <stdint.h>
 
 #define SENSOR_COUNT   16
-#define SENSOR_THR_DEF 2048   /* fallback threshold before calibration */
+#define SENSOR_THR_DEF 2500   /* fallback threshold: midpoint of white(~1350) and black(~3600) */
 
 /* -----------------------------------------------------------------------
  * SENSOR GEOMETRY — tune these two values to match your hardware
@@ -52,7 +52,7 @@
 
 /* Maximum possible position returned by Sensor_ComputePosition().        */
 /* = position of I0 (or I15) when only that outermost sensor is active.   */
-#define SENSOR_POS_MAX  (7500 + 2 * SENSOR_CURVE_EXTRA)  /* = 8500 */
+#define SENSOR_POS_MAX  (6500 + 1 * SENSOR_CURVE_EXTRA)  /* = 7000 with I1/I14 outermost */
 
 /* Runtime state ----------------------------------------------------------- */
 extern uint8_t  sensorVal[SENSOR_COUNT];  /* 1 = on line, 0 = off line     */
@@ -70,6 +70,7 @@ extern uint8_t  sensorCalibrated;           /* 1 = cal data valid            */
 /* -------------------------------------------------------------------------
  * Sensor_ReadAll:
  *   Reads all 16 channels through the MUX.
+ *   Channels 0 and 15 are ignored in this project.
  *   If sensorCalibrated, uses per-channel midpoint threshold.
  *   Otherwise uses the global sensorThreshold.
  */
@@ -78,7 +79,7 @@ void    Sensor_ReadAll(void);
 /*
  * Compute weighted-average position from sensorVal[].
  * Writes result into linePosition and returns it.
- * LINE LOST: returns ±7500 toward the side the line last disappeared on.
+ * LINE LOST: returns ±SENSOR_POS_MAX toward the side the line last disappeared on.
  */
 int16_t Sensor_ComputePosition(void);
 

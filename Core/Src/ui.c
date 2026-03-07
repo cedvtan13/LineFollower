@@ -1,263 +1,155 @@
 /*
- * ui.c  —  UI/display rendering
- *
- * Layout: row 0 = title, y=8 = 1px divider, rows 2-6 = content, row 7 = hint.
+ * ui.c  —  simple OLED rendering
  */
 
 #include "ui.h"
-#include "sh1106.h"
-#include "pid_controller.h"
 #include "calibration.h"
+#include "menu.h"
+#include "pid_controller.h"
 #include "sensor.h"
-#include <stdio.h>
-#include <string.h>
+#include "sh1106.h"
 #include <math.h>
+#include <stdio.h>
 
-static char buf[32];
+static char buf[24];
 
-static void UI_WriteChar(char c)
+static void DrawHeader(const char *title)
 {
-    char tmp[2] = {c, '\0'};
-    sh1106_WriteString(tmp);
-}
-
-/* Title row + thin 1px divider. page=0 → no page number. */
-static void DrawHeader(const char *title, uint8_t page)
-{
+    sh1106_Clear();
     sh1106_SetCursor(0, 0);
     sh1106_WriteString(title);
-    if (page) {
-        char pg[8];
-        sprintf(pg, "%d/3", page);
-        sh1106_SetCursor(116, 0);
-        sh1106_WriteString(pg);
-    }
-    sh1106_FillRect(0, 8, 127, 8); /* 1 px divider */
+    sh1106_FillRect(0, 8, 127, 8);
 }
 
-/* ================================================================
-   SCREEN DRAWS
-   ================================================================ */
-
-static void UI_DrawMainMenu(void)
+static void DrawSensorBar(uint8_t row)
 {
-    sh1106_Clear();
-
-    if (mainCursor == 0) {
-        DrawHeader("LINE FOLLOWER", 1);
-
-        {
-            int kpI = (int)pid.Kp, kpF = (int)(fabsf(pid.Kp-(float)kpI)*10.0f);
-            int kdI = (int)pid.Kd, kdF = (int)(fabsf(pid.Kd-(float)kdI)*10.0f);
-            sprintf(buf, "Kp:%d.%d       Kd:%d.%d", kpI, kpF, kdI, kdF);
-        }
-        sh1106_SetCursor(0, 2); sh1106_WriteString(buf);
-
-        {
-            int kiI = (int)pid.Ki, kiF = (int)(fabsf(pid.Ki-(float)kiI)*100.0f);
-            sprintf(buf, "Ki:%d.%02d      Spd:%d%%", kiI, kiF, pid.baseSpeed);
-        }
-        sh1106_SetCursor(0, 3); sh1106_WriteString(buf);
-
-        sh1106_SetCursor(0, 5);
-        sh1106_WriteString(calibrated ? "Cal: DONE" : "Cal: NOT DONE");
-
-        sh1106_SetCursor(0, 6);
-        sh1106_WriteString(">> PRESS E TO RUN <<");
-
-        sh1106_SetCursor(0, 7); sh1106_WriteString("< >              E:go");
-
-    } else if (mainCursor == 1) {
-        DrawHeader("PID SETTINGS", 2);
-
-        {int i=(int)pid.Kp, f=(int)(fabsf(pid.Kp-(float)i)*100); sprintf(buf,"  Kp  %d.%02d",i,f);}
-        sh1106_SetCursor(0, 2); sh1106_WriteString(buf);
-        {int i=(int)pid.Ki, f=(int)(fabsf(pid.Ki-(float)i)*100); sprintf(buf,"  Ki  %d.%02d",i,f);}
-        sh1106_SetCursor(0, 3); sh1106_WriteString(buf);
-        {int i=(int)pid.Kd, f=(int)(fabsf(pid.Kd-(float)i)*100); sprintf(buf,"  Kd  %d.%02d",i,f);}
-        sh1106_SetCursor(0, 4); sh1106_WriteString(buf);
-        sprintf(buf, "  Spd %d%%", pid.baseSpeed);
-        sh1106_SetCursor(0, 5); sh1106_WriteString(buf);
-
-        sh1106_SetCursor(0, 7); sh1106_WriteString("< >           E:edit");
-
-    } else {
-        DrawHeader("SENSOR DEBUG", 3);
-
-        sh1106_SetCursor(0, 2); sh1106_WriteString("Raw 12-bit ADC values");
-        sh1106_SetCursor(0, 3); sh1106_WriteString("* = on line");
-        sh1106_SetCursor(0, 4); sh1106_WriteString(". = off line");
-
-        sh1106_SetCursor(0, 7); sh1106_WriteString("< >              E:go");
+    int8_t ch;
+    sh1106_SetCursor(0, row);
+    sh1106_WriteString("L ");
+    for (ch = 15; ch >= 0; ch--) {
+        char c[2] = {sensorVal[ch] ? '*' : '.', '\0'};
+        sh1106_WriteString(c);
     }
 }
 
-static void UI_DrawSensorDebug(void)
+static void UI_DrawMain(void)
 {
-    sh1106_Clear();
-    for (uint8_t i = 0; i < 8; i++) {
-        uint8_t chL = i;
-        uint8_t chR = i + 8;
-        char line[22];
-        sprintf(line, "%2u:%04u%c  %2u:%04u%c",
-                chL, sensorRaw[chL], sensorVal[chL] ? '*' : '.',
-                chR, sensorRaw[chR], sensorVal[chR] ? '*' : '.');
-        sh1106_SetCursor(0, i);
-        sh1106_WriteString(line);
+    static const char *items[4] = {"RUN", "PID", "CAL", "SENS"};
+    uint8_t i;
+
+    DrawHeader("LINE FOLLOWER");
+    snprintf(buf, sizeof(buf), "CAL:%s", calibrated ? "DONE" : "NO");
+    sh1106_SetCursor(0, 2);
+    sh1106_WriteString(buf);
+
+    for (i = 0; i < 4u; i++) {
+        sh1106_SetCursor(0, (uint8_t)(3u + i));
+        sh1106_WriteString((i == mainCursor) ? "> " : "  ");
+        sh1106_WriteString(items[i]);
     }
 }
 
 static void UI_DrawRunning(void)
 {
-    sh1106_Clear();
-    DrawHeader("RUNNING", 0);
-    sh1106_SetCursor(78, 0); sh1106_WriteString("E:STOP");
-
-    /* Sensor bar — all 16 sensors (ch=15..0, displayed left→right) */
-    sh1106_SetCursor(4, 1);
-    sh1106_WriteString("L ");
-    for (int8_t ch = 15; ch >= 0; ch--)
-        UI_WriteChar(sensorVal[ch] ? '*' : '.');
-    sh1106_WriteString(" R");
-
-    /* Position indicator bar (8px tall, row 2) */
-    sh1106_DrawRect(0, 16, 127, 23);
-    {
-        int32_t px = ((int32_t)linePosition + (int32_t)SENSOR_POS_MAX)
-                     * 122l / (2l * (int32_t)SENSOR_POS_MAX) + 3;
-        if (px < 4)   px = 4;
-        if (px > 123) px = 123;
-        sh1106_FillRect((uint8_t)(px - 3), 17, (uint8_t)(px + 3), 22);
-    }
-
-    /* Direction */
-    sh1106_SetCursor(0, 3);
-    if      (linePosition < -(SENSOR_POS_MAX / 3)) sh1106_WriteString("<< LEFT             ");
-    else if (linePosition >  (SENSOR_POS_MAX / 3)) sh1106_WriteString("            RIGHT >>");
-    else                                            sh1106_WriteString("     [ CENTRED ]    ");
-
-    /* Error + speed */
-    {
-        int  pos = linePosition >= 0 ? linePosition : -linePosition;
-        char sgn = linePosition >= 0 ? '+' : '-';
-        sprintf(buf, "Err:%c%-4d    Spd:%d%%", sgn, pos, pid.baseSpeed);
-    }
+    DrawHeader("RUNNING");
+    DrawSensorBar(2);
+    snprintf(buf, sizeof(buf), "POS:%6d ACT:%2u", linePosition, sensorActiveCount);
     sh1106_SetCursor(0, 4);
     sh1106_WriteString(buf);
-
-    /* Run time + health */
-    {
-        uint32_t sec = runElapsedMs / 1000u;
-        uint32_t ten = (runElapsedMs % 1000u) / 100u;
-        sprintf(buf, "T:%lu.%lus  Act:%d", sec, ten, sensorActiveCount);
-    }
-    sh1106_SetCursor(0, 5); sh1106_WriteString(buf);
-
-    if (pidOscillating) {
-        sh1106_SetCursor(0, 6); sh1106_WriteString("!! OSCILLATING !!");
-    }
-
-    sh1106_SetCursor(0, 7); sh1106_WriteString("Hold E to stop");
-}
-
-static void UI_DrawCalibrate(void)
-{
-    sh1106_Clear();
-
-    if (calState == CAL_IDLE) {
-        DrawHeader("CALIBRATE", 0);
-
-        sh1106_SetCursor(0, 2); sh1106_WriteString("Place on track over");
-        sh1106_SetCursor(0, 3); sh1106_WriteString("black and white.");
-        sh1106_SetCursor(0, 5); sh1106_WriteString("Robot spins CW 5s.");
-
-        sh1106_SetCursor(0, 7); sh1106_WriteString("E:start       L:back");
-
-    } else {
-        uint32_t ms  = Calibration_TimeRemaining();
-        uint32_t sec = ms / 1000u;
-        uint32_t ten = (ms % 1000u) / 100u;
-
-        sh1106_SetCursor(0, 0); sh1106_WriteString("CALIBRATING...");
-        sprintf(buf, "%lu.%lus", sec, ten);
-        sh1106_SetCursor(93, 0); sh1106_WriteString(buf);
-        sh1106_FillRect(0, 8, 127, 8);
-
-        /* Sensor bar — all 16 sensors (ch=15..0, displayed left→right) */
-        sh1106_SetCursor(4, 1);
-        sh1106_WriteString("L ");
-        for (int8_t ch = 15; ch >= 0; ch--)
-            UI_WriteChar(sensorVal[ch] ? '*' : '.');
-        sh1106_WriteString(" R");
-
-        /* Confidence blocks — all 16 channels, 8 px each */
-        for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
-            uint8_t  ch    = 15u - i;
-            uint16_t swing = (sensorCalMax[ch] > sensorCalMin[ch])
-                             ? (sensorCalMax[ch] - sensorCalMin[ch]) : 0u;
-            if (swing >= 600u)
-                sh1106_FillRect((uint8_t)(i * 8), 16,
-                                (uint8_t)(i * 8 + 6), 25);
-        }
-
-        uint8_t ready = Sensor_CalConfidence();
-        sprintf(buf, "Ready: %d / 16", ready);
-        sh1106_SetCursor(0, 4); sh1106_WriteString(buf);
-
-        sh1106_SetCursor(0, 7); sh1106_WriteString("E / L = abort");
-    }
+    snprintf(buf, sizeof(buf), "T:%lu.%lus %s",
+             (unsigned long)(runElapsedMs / 1000u),
+             (unsigned long)((runElapsedMs % 1000u) / 100u),
+             pidLineLost ? "LOST" : "OK");
+    sh1106_SetCursor(0, 5);
+    sh1106_WriteString(buf);
+    sh1106_SetCursor(0, 7);
+    sh1106_WriteString("E:STOP");
 }
 
 static void UI_DrawPID(void)
 {
-    sh1106_Clear();
-    DrawHeader("PID TUNING", 0);
+    int ip;
+    int fp;
 
-    const char *labels[5] = {"Kp ", "Ki ", "Kd ", "Spd", "   "};
-    uint8_t     rows[5]   = {2, 3, 4, 5, 6};
+    DrawHeader("PID TUNING");
+    ip = (int)pid.Kp;
+    fp = (int)roundf(fabsf(pid.Kp - (float)ip) * 100.0f);
+    snprintf(buf, sizeof(buf), "%cKp  %d.%02d", pidCursor == 0u ? (pidEdit ? '*' : '>') : ' ', ip, fp);
+    sh1106_SetCursor(0, 2);
+    sh1106_WriteString(buf);
 
-    for (uint8_t i = 0; i < 5; i++) {
-        char cur = (i == pidCursor) ? ((pidEdit && i < 4) ? '*' : '>') : ' ';
-        sh1106_SetCursor(0, rows[i]); UI_WriteChar(cur);
-        sh1106_SetCursor(8, rows[i]);
+    ip = (int)pid.Kd;
+    fp = (int)roundf(fabsf(pid.Kd - (float)ip) * 100.0f);
+    snprintf(buf, sizeof(buf), "%cKd  %d.%02d", pidCursor == 1u ? (pidEdit ? '*' : '>') : ' ', ip, fp);
+    sh1106_SetCursor(0, 3);
+    sh1106_WriteString(buf);
 
-        if (i < 3) {
-            float *v[3] = {&pid.Kp, &pid.Ki, &pid.Kd};
-            int ip = (int)*v[i], fp = (int)(fabsf(*v[i]-(float)ip)*100.0f);
-            sprintf(buf, "%s %d.%02d", labels[i], ip, fp);
-        } else if (i == 3) {
-            sprintf(buf, "%s %d%%", labels[i], pid.baseSpeed);
-        } else {
-            sprintf(buf, "SAVE TO FLASH");
-        }
-        sh1106_WriteString(buf);
-    }
+    snprintf(buf, sizeof(buf), "%cSpd %3u%%", pidCursor == 2u ? (pidEdit ? '*' : '>') : ' ', pid.baseSpeed);
+    sh1106_SetCursor(0, 4);
+    sh1106_WriteString(buf);
+
+    snprintf(buf, sizeof(buf), "%cTrn %3u%%", pidCursor == 3u ? (pidEdit ? '*' : '>') : ' ', pid.turnSpeed);
+    sh1106_SetCursor(0, 5);
+    sh1106_WriteString(buf);
 
     sh1106_SetCursor(0, 7);
-    if      (pidCursor == 4) sh1106_WriteString("E = save to flash");
-    else if (pidEdit)        sh1106_WriteString("L/R:change  E:done");
-    else                     sh1106_WriteString("L/R:move    E:edit");
+    sh1106_WriteString(pidEdit ? "L/R:chg E:done" : "L/R:mv E:edit");
 }
 
-/* ================================================================
-   PUBLIC API
-   ================================================================ */
+static void UI_DrawCalibrate(void)
+{
+    if (calState == CAL_IDLE) {
+        DrawHeader("CALIBRATE");
+        sh1106_SetCursor(0, 2);
+        sh1106_WriteString("Place on line");
+        sh1106_SetCursor(0, 3);
+        sh1106_WriteString("Press E to spin");
+        sh1106_SetCursor(0, 5);
+        sh1106_WriteString("L/hold E:back");
+    } else {
+        snprintf(buf, sizeof(buf), "CAL %lu.%lus",
+                 (unsigned long)(Calibration_TimeRemaining() / 1000u),
+                 (unsigned long)((Calibration_TimeRemaining() % 1000u) / 100u));
+        DrawHeader(buf);
+        DrawSensorBar(2);
+        snprintf(buf, sizeof(buf), "READY:%2u/16", Sensor_CalConfidence());
+        sh1106_SetCursor(0, 5);
+        sh1106_WriteString(buf);
+        sh1106_SetCursor(0, 7);
+        sh1106_WriteString("E:abort");
+    }
+}
+
+static void UI_DrawDebug(void)
+{
+    uint8_t i;
+
+    DrawHeader("SENSOR DEBUG");
+    for (i = 0; i < 5u; i++) {
+        uint8_t a = (uint8_t)(1u + i);
+        uint8_t b = (uint8_t)(8u + i);
+        snprintf(buf, sizeof(buf), "%02u:%4u %02u:%4u", a, sensorRaw[a], b, sensorRaw[b]);
+        sh1106_SetCursor(0, (uint8_t)(2u + i));
+        sh1106_WriteString(buf);
+    }
+    sh1106_SetCursor(0, 7);
+    sh1106_WriteString("L/E:back");
+}
 
 void UI_Init(void)
 {
     sh1106_Init();
-    sh1106_Clear();
     UI_Refresh();
 }
 
 void UI_Refresh(void)
 {
     switch (currentScreen) {
-        case SCR_MAIN:         UI_DrawMainMenu();     break;
-        case SCR_RUNNING:      UI_DrawRunning();      break;
-        case SCR_CALIBRATE:    UI_DrawCalibrate();    break;
-        case SCR_PID:          UI_DrawPID();          break;
-        case SCR_SENSOR_DEBUG: UI_DrawSensorDebug();  break;
+        case SCR_MAIN: UI_DrawMain(); break;
+        case SCR_RUNNING: UI_DrawRunning(); break;
+        case SCR_PID: UI_DrawPID(); break;
+        case SCR_CALIBRATE: UI_DrawCalibrate(); break;
+        case SCR_SENSOR_DEBUG: UI_DrawDebug(); break;
     }
     sh1106_Display();
 }
