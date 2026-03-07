@@ -122,6 +122,8 @@ static uint16_t ADC_ReadPB1(void)
 
 void Sensor_ReadAll(void)
 {
+    uint16_t mn = 4095u, mx = 0u;
+
     for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
         MUX_Select(ch);
         sensorRaw[ch] = ADC_ReadPB1();
@@ -135,8 +137,19 @@ void Sensor_ReadAll(void)
             sensorFiltered[ch] = (uint16_t)(0.3f * (float)sensorRaw[ch]
                                           + 0.7f * (float)sensorFiltered[ch]);
 
-        /* Threshold against filtered value — not raw — for stable sensorVal[] */
-        uint16_t thr = sensorCalibrated ? calThr[ch] : sensorThreshold;
+        if (sensorFiltered[ch] < mn) mn = sensorFiltered[ch];
+        if (sensorFiltered[ch] > mx) mx = sensorFiltered[ch];
+    }
+
+    /* Compute sensorVal[] using the same threshold logic as
+     * Sensor_ComputePosition so the debug screen always matches
+     * what the PID actually sees. */
+    uint16_t liveThr = (!sensorCalibrated && (mx - mn) > 200u)
+                       ? (mn + mx) / 2u
+                       : sensorThreshold;
+
+    for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
+        uint16_t thr = sensorCalibrated ? calThr[ch] : liveThr;
         sensorVal[ch] = (sensorFiltered[ch] > thr) ? 1u : 0u;
     }
 }
@@ -186,29 +199,43 @@ int16_t Sensor_ComputePosition(void)
         return linePosition;
     } else {
         /*
-         * BINARY MODE (before calibration)
-         * ----------------------------------
-         * Same physical position table, but sensorVal[] are 0/1.
-         * Still better than uniform weights because curved sensors
-         * carry their correct (larger) position.
+         * CONFIDENCE-WEIGHTED MODE (before calibration)
+         * -----------------------------------------------
+         * Instead of a fixed 2048 threshold, compute a per-frame midpoint
+         * liveThr = (min + max) / 2.  Sensors above the threshold contribute
+         * a confidence weight proportional to how far above the threshold
+         * they are.  This gives sub-sensor resolution even without cal data
+         * (inspired by the Teensy maze-solver's confidence scoring).
          */
-        int32_t weighted = 0, total = 0;
+        uint16_t mn = 4095u, mx = 0u;
         for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
-            if (!sensorVal[ch]) continue;
-            weighted += (int32_t)SENS_POS[ch];
-            total++;
+            if (sensorFiltered[ch] < mn) mn = sensorFiltered[ch];
+            if (sensorFiltered[ch] > mx) mx = sensorFiltered[ch];
         }
-        if (total == 0) {
-            /* All white — line not seen */
+        uint16_t span = mx - mn;
+        uint16_t liveThr = (span > 200u) ? (mn + mx) / 2u : SENSOR_THR_DEF;
+
+        float weighted = 0.0f, total = 0.0f;
+        uint8_t active = 0;
+        for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
+            if (sensorFiltered[ch] <= liveThr) continue;
+            /* Confidence = how far above threshold, normalised 0..1 */
+            float conf = (span > 200u)
+                       ? (float)(sensorFiltered[ch] - liveThr) / (float)(mx - liveThr)
+                       : 1.0f;  /* fallback: equal weight */
+            weighted += conf * (float)SENS_POS[ch];
+            total    += conf;
+            active++;
+        }
+        if (total < 0.01f) {
             sensorActiveCount = 0;
             return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
         }
-        if (total >= 6) {
-            /* More than 5 sensors black — saturation, not a real 1-inch line */
+        if (active >= 6) {
             sensorActiveCount = 0;
             return (linePosition >= 0) ? SENSOR_POS_MAX : -SENSOR_POS_MAX;
         }
-        sensorActiveCount = (uint8_t)total;
+        sensorActiveCount = active;
         linePosition = (int16_t)(weighted / total);
         return linePosition;
     }
@@ -235,11 +262,20 @@ void Sensor_CalUpdate(void)
         MUX_Select(ch);
         uint16_t raw = ADC_ReadPB1();
         sensorRaw[ch] = raw;
+
+        /* Keep EMA updated during spin so the calibration screen
+         * sensor bar shows filtered (stable) values. */
+        if (sensorFiltered[ch] == 0)
+            sensorFiltered[ch] = raw;
+        else
+            sensorFiltered[ch] = (uint16_t)(0.3f * (float)raw
+                                          + 0.7f * (float)sensorFiltered[ch]);
+
         if (raw < sensorCalMin[ch]) sensorCalMin[ch] = raw;
         if (raw > sensorCalMax[ch]) sensorCalMax[ch] = raw;
-        /* Live binary value using current cal data mid-point (if any swing seen) */
+        /* Live binary value using current cal data mid-point */
         uint16_t thr = (sensorCalMin[ch] + sensorCalMax[ch]) / 2u;
-        sensorVal[ch] = (raw > thr) ? 1u : 0u;
+        sensorVal[ch] = (sensorFiltered[ch] > thr) ? 1u : 0u;
     }
 }
 
@@ -253,6 +289,25 @@ void Sensor_CalFinish(void)
         calThr[ch] = (sensorCalMin[ch] + sensorCalMax[ch]) / 2u;
     }
     sensorCalibrated = 1;
+
+    /* Reset EMA filter — stale values from the calibration spin cause a
+     * false all-black reading on the first Sensor_ComputePosition() call,
+     * which makes the robot turn CW then stop immediately after cal. */
+    memset(sensorFiltered, 0, sizeof(sensorFiltered));
+
+    /* Seed with 3 fresh reads for a clean post-cal baseline */
+    for (uint8_t flush = 0; flush < 3; flush++) {
+        for (uint8_t ch = 0; ch < SENSOR_COUNT; ch++) {
+            MUX_Select(ch);
+            uint16_t raw = ADC_ReadPB1();
+            sensorRaw[ch] = raw;
+            if (sensorFiltered[ch] == 0)
+                sensorFiltered[ch] = raw;
+            else
+                sensorFiltered[ch] = (uint16_t)(0.3f * (float)raw
+                                              + 0.7f * (float)sensorFiltered[ch]);
+        }
+    }
 }
 
 uint8_t Sensor_CalConfidence(void)

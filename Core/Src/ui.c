@@ -28,8 +28,8 @@ static void DrawHeader(const char *title, uint8_t page)
     sh1106_WriteString(title);
     if (page) {
         char pg[8];
-        sprintf(pg, "%d/4", page);
-        sh1106_SetCursor(110, 0);
+        sprintf(pg, "%d/3", page);
+        sh1106_SetCursor(116, 0);
         sh1106_WriteString(pg);
     }
     sh1106_FillRect(0, 8, 127, 8); /* 1 px divider */
@@ -68,18 +68,7 @@ static void UI_DrawMainMenu(void)
         sh1106_SetCursor(0, 7); sh1106_WriteString("< >              E:go");
 
     } else if (mainCursor == 1) {
-        DrawHeader("CALIBRATE", 2);
-
-        sh1106_SetCursor(0, 2); sh1106_WriteString("Place on track over");
-        sh1106_SetCursor(0, 3); sh1106_WriteString("black and white.");
-        sh1106_SetCursor(0, 5);
-        sh1106_WriteString(calibrated ? "Status: DONE" : "Status: NOT DONE");
-        sh1106_SetCursor(0, 6); sh1106_WriteString("Press E, spins CW 5s");
-
-        sh1106_SetCursor(0, 7); sh1106_WriteString("< >              E:go");
-
-    } else if (mainCursor == 2) {
-        DrawHeader("PID SETTINGS", 3);
+        DrawHeader("PID SETTINGS", 2);
 
         {int i=(int)pid.Kp, f=(int)(fabsf(pid.Kp-(float)i)*100); sprintf(buf,"  Kp  %d.%02d",i,f);}
         sh1106_SetCursor(0, 2); sh1106_WriteString(buf);
@@ -93,7 +82,7 @@ static void UI_DrawMainMenu(void)
         sh1106_SetCursor(0, 7); sh1106_WriteString("< >           E:edit");
 
     } else {
-        DrawHeader("SENSOR DEBUG", 4);
+        DrawHeader("SENSOR DEBUG", 3);
 
         sh1106_SetCursor(0, 2); sh1106_WriteString("Raw 12-bit ADC values");
         sh1106_SetCursor(0, 3); sh1106_WriteString("* = on line");
@@ -155,6 +144,18 @@ static void UI_DrawRunning(void)
     }
     sh1106_SetCursor(0, 4);
     sh1106_WriteString(buf);
+
+    /* Run time + health */
+    {
+        uint32_t sec = runElapsedMs / 1000u;
+        uint32_t ten = (runElapsedMs % 1000u) / 100u;
+        sprintf(buf, "T:%lu.%lus  Act:%d", sec, ten, sensorActiveCount);
+    }
+    sh1106_SetCursor(0, 5); sh1106_WriteString(buf);
+
+    if (pidOscillating) {
+        sh1106_SetCursor(0, 6); sh1106_WriteString("!! OSCILLATING !!");
+    }
 
     sh1106_SetCursor(0, 7); sh1106_WriteString("Hold E to stop");
 }

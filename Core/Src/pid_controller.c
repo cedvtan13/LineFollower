@@ -77,18 +77,31 @@ static uint32_t lineLostAt = 0;
 static int16_t  recovL     = 0;
 static int16_t  recovR     = 0;
 
+/* --- Performance metrics (public, read by ui.c) --- */
+uint32_t runStartMs   = 0;    /* HAL_GetTick() when RUN started   */
+uint32_t runElapsedMs = 0;    /* updated every PID_Update          */
+
+/* --- Simple health monitor --- */
+static uint8_t  signFlipCount = 0;   /* error sign changes in window */
+static uint32_t signWindowMs  = 0;   /* start of current 500 ms window */
+uint8_t  pidOscillating = 0;         /* 1 = oscillation detected */
+
 /* ================================================================
    INITIALIZATION
    ================================================================ */
 
 void PID_Reset(void)
 {
-    pidIntegral  = 0.0f;
-    pidLastError = 0.0f;
-    pidDeriv     = 0.0f;
-    lineLostAt   = 0;
-    recovL       = 0;
-    recovR       = 0;
+    pidIntegral   = 0.0f;
+    pidLastError  = 0.0f;
+    pidDeriv      = 0.0f;
+    lineLostAt    = 0;
+    recovL        = 0;
+    recovR        = 0;
+    runElapsedMs  = 0;
+    signFlipCount = 0;
+    signWindowMs  = 0;
+    pidOscillating = 0;
 }
 
 void PID_Init(void)
@@ -112,6 +125,9 @@ void PID_Update(void)
         lastSensorMs = now;
     }
     linePosition = Sensor_ComputePosition();
+
+    /* Update run timer */
+    if (runStartMs) runElapsedMs = now - runStartMs;
 
     /* ================================================================
        LOST-LINE / DASHED-LINE HANDLING
@@ -159,14 +175,34 @@ void PID_Update(void)
        ================================================================ */
     float rawDeriv = error - pidLastError;
     pidDeriv       = DERIV_ALPHA * rawDeriv + (1.0f - DERIV_ALPHA) * pidDeriv;
+
+    /* --- Health monitor: detect oscillation --- */
+    if ((error > 0.0f) != (pidLastError > 0.0f)) {
+        signFlipCount++;
+    }
+    if (now - signWindowMs >= 500u) {
+        /* >8 sign changes in 500 ms = oscillation (>16 Hz) */
+        pidOscillating = (signFlipCount > 8) ? 1u : 0u;
+        signFlipCount  = 0;
+        signWindowMs   = now;
+    }
+
     pidLastError   = error;
 
     /* ================================================================
        COMBINED PID OUTPUT
        ================================================================ */
-    float output = pid.Kp * error
+    /* Adaptive gain scaling — increase Kp and Kd slightly at higher base
+     * speed so the robot reacts more aggressively on fast runs.  At 100 %
+     * speed, Kp gets +20 % and Kd +15 %.  At low speed, gains stay nominal.
+     * (Inspired by the Teensy code's adaptiveKp / adaptiveKd.) */
+    float spdFactor = (float)pid.baseSpeed / 100.0f;
+    float aKp = pid.Kp * (1.0f + 0.20f * spdFactor);
+    float aKd = pid.Kd * (1.0f + 0.15f * spdFactor);
+
+    float output = aKp   * error
                  + pid.Ki * pidIntegral
-                 + pid.Kd * pidDeriv;
+                 + aKd   * pidDeriv;
 
     static const float STEER_SCALE = 100.0f / (float)SENSOR_POS_MAX;
     float steering = output * STEER_SCALE;

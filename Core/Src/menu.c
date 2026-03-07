@@ -71,47 +71,33 @@ static void Handle_MainMenu(ButtonEvent ev)
 {
     switch (ev) {
         case BTN_LEFT:
-            mainCursor = (mainCursor > 0) ? (mainCursor - 1) : 3;
+            mainCursor = (mainCursor > 0) ? (mainCursor - 1) : 2;
             UI_Refresh();
             break;
 
         case BTN_RIGHT:
-            mainCursor = (mainCursor < 3) ? (mainCursor + 1) : 0;
+            mainCursor = (mainCursor < 2) ? (mainCursor + 1) : 0;
             UI_Refresh();
             break;
 
         case BTN_ENTER_SHORT:
             switch (mainCursor) {
                 case 0: /* RUN */
-                    if (!calibrated) {
-                        sh1106_Clear();
-                        sh1106_SetCursor(4, 3);
-                        sh1106_WriteString("Calibrate first!");
-                        sh1106_Display();
-                        HAL_Delay(1500);
-                        UI_Refresh();
-                    } else {
-                        PID_Reset();
-                        Motor_Enable();
-                        currentScreen = SCR_RUNNING;
-                        UI_Refresh();
-                    }
-                    break;
-
-                case 1: /* CALIBRATE — start spin directly, no idle screen */
-                    Calibration_Start();
-                    currentScreen = SCR_CALIBRATE;
+                    PID_Reset();
+                    runStartMs = HAL_GetTick();
+                    Motor_Enable();
+                    currentScreen = SCR_RUNNING;
                     UI_Refresh();
                     break;
 
-                case 2: /* PID */
+                case 1: /* PID */
                     currentScreen = SCR_PID;
                     pidCursor = 0;
                     pidEdit = 0;
                     UI_Refresh();
                     break;
 
-                case 3: /* SENSOR DEBUG */
+                case 2: /* SENSOR DEBUG */
                     currentScreen = SCR_SENSOR_DEBUG;
                     UI_Refresh();
                     break;
@@ -136,6 +122,20 @@ static void Handle_Running(ButtonEvent ev)
         case BTN_ENTER_LONG:
             Motor_Stop();
             PID_Reset();
+            /* Show run summary briefly before returning to main menu */
+            {
+                uint32_t sec = runElapsedMs / 1000u;
+                uint32_t ms  = runElapsedMs % 1000u;
+                char tmp[22];
+                sh1106_Clear();
+                sh1106_SetCursor(16, 2);
+                sh1106_WriteString("RUN STOPPED");
+                sprintf(tmp, "Time: %lu.%lus", sec, ms / 100u);
+                sh1106_SetCursor(16, 4);
+                sh1106_WriteString(tmp);
+                sh1106_Display();
+                HAL_Delay(1500);
+            }
             currentScreen = SCR_MAIN;
             UI_Refresh();
             break;

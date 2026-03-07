@@ -18,4 +18,11 @@ void PID_Update(void);
 /* Reset integral and derivative state (e.g., on stop) */
 void PID_Reset(void);
 
+/* Performance metrics (updated in PID_Update) */
+extern uint32_t runStartMs;     /* set to HAL_GetTick() when run starts */
+extern uint32_t runElapsedMs;   /* elapsed ms since run started         */
+
+/* Health monitor */
+extern uint8_t  pidOscillating; /* 1 = PID error oscillating too fast  */
+
 #endif

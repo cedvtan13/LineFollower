@@ -2,6 +2,8 @@ CompileFlags:
   Add:
     - '-ferror-limit=0'
     - '-Wno-implicit-int'
+    - '-I/usr/lib/arm-none-eabi/include'
+    - '-I/usr/lib/gcc/arm-none-eabi/13.2.1/include'
   CompilationDatabase: build/Debug
 Diagnostics:
   Suppress:
